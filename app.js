@@ -730,7 +730,7 @@ document.getElementById('btn-download-template')?.addEventListener('click', () =
     // Set column widths
     worksheet['!cols'] = [{ wch: 20 }, { wch: 20 }];
     
-    XLSX.writeFile(workbook, "induio_customers_template.xlsx");
+    XLSX.writeFile(workbook, "Manageetha_customers_template.xlsx");
 });
 
 
