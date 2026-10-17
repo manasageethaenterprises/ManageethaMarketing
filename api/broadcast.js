@@ -1,5 +1,36 @@
 const { getDb } = require('../lib/db');
-const { formatMetaMediaObject, resolveTemplateHeaderMedia } = require('../lib/meta-template');
+
+// Format media_id into Meta-compatible object: { id: <integer|string> } or { link: <url> }
+function formatMetaMediaObject(media_id, req) {
+    if (!media_id) return null;
+    const str = String(media_id).trim();
+    if (!str) return null;
+
+    // 1. Numeric Meta Media ID
+    if (/^\d+$/.test(str)) {
+        const num = parseInt(str, 10);
+        if (!isNaN(num) && num < Number.MAX_SAFE_INTEGER) {
+            return { id: num };
+        }
+        return { id: str };
+    }
+
+    // 2. Meta Resumable Upload handle (e.g. "4::aW1hZ2UvanBlZw==...") or internal Meta handle
+    if (str.startsWith('4::') || str.includes('::') || (!str.includes('/') && !str.includes('.'))) {
+        return { id: str };
+    }
+
+    // 3. Absolute URL (e.g. from Meta CDN / scontent / lookaside or external storage)
+    if (str.startsWith('http://') || str.startsWith('https://')) {
+        return { link: str };
+    }
+
+    // 4. Local relative media path hosted on the platform
+    const host = (req && req.headers && req.headers['host']) || 'marketing.manageetha.in';
+    const proto = (req && req.headers && req.headers['x-forwarded-proto']) || 'https';
+    const cleanPath = str.startsWith('/') ? str : '/' + str;
+    return { link: `${proto}://${host}${cleanPath}` };
+}
 
 module.exports = async (req, res) => {
     if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
@@ -24,9 +55,10 @@ module.exports = async (req, res) => {
         const url = `https://graph.facebook.com/v19.0/${phoneId}/messages`;
 
         let templateMeta = null;
-        let resolvedHeader = null;
+        let templateDefaultMediaObj = null;
+        let defaultMediaUrl = null;
 
-        // Fetch template metadata and auto-resolve header ONCE for the entire broadcast
+        // Fetch template metadata once for the entire broadcast
         if (type === 'template' && wabaId && token && template_name) {
             try {
                 const metaRes = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/message_templates?name=${encodeURIComponent(template_name)}`, {
@@ -40,7 +72,21 @@ module.exports = async (req, res) => {
                 console.error('Failed to fetch template metadata for broadcast:', e);
             }
 
-            resolvedHeader = await resolveTemplateHeaderMedia(templateMeta, media_id, req, phoneId, token);
+            if (templateMeta) {
+                const headerComp = (templateMeta.components || []).find(c => c.type === 'HEADER');
+                if (headerComp && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerComp.format)) {
+                    let defaultSource = media_id;
+                    if (!defaultSource && headerComp.example) {
+                        const handle = Array.isArray(headerComp.example.header_handle) ? headerComp.example.header_handle[0] : headerComp.example.header_handle;
+                        const u = Array.isArray(headerComp.example.header_url) ? headerComp.example.header_url[0] : headerComp.example.header_url;
+                        defaultSource = handle || u;
+                    }
+                    if (defaultSource) {
+                        templateDefaultMediaObj = formatMetaMediaObject(defaultSource, req);
+                        defaultMediaUrl = (typeof defaultSource === 'string' && defaultSource.startsWith('http')) ? defaultSource : null;
+                    }
+                }
+            }
         }
 
         let sent = 0;
@@ -62,14 +108,14 @@ module.exports = async (req, res) => {
                 type: type
             };
 
+            const mediaObjFormatted = formatMetaMediaObject(media_id, req);
+
             if (type === 'text') {
                 payload.text = { body: content };
             } else if (type === 'image') {
-                const mediaObj = formatMetaMediaObject(media_id, req);
-                payload.image = mediaObj ? { ...mediaObj, caption: content } : { caption: content };
+                payload.image = mediaObjFormatted ? { ...mediaObjFormatted, caption: content } : { caption: content };
             } else if (type === 'video') {
-                const mediaObj = formatMetaMediaObject(media_id, req);
-                payload.video = mediaObj ? { ...mediaObj, caption: content } : { caption: content };
+                payload.video = mediaObjFormatted ? { ...mediaObjFormatted, caption: content } : { caption: content };
             }
 
             let responseData = null;
@@ -93,7 +139,13 @@ module.exports = async (req, res) => {
                     const headerComp = tmplComponents.find(c => c.type === 'HEADER');
                     if (headerComp && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerComp.format)) {
                         const format = headerComp.format.toLowerCase();
-                        const mediaObj = resolvedHeader ? resolvedHeader.mediaObj : formatMetaMediaObject(media_id, req);
+                        let mediaObj = media_id ? formatMetaMediaObject(media_id, req) : templateDefaultMediaObj;
+                        if (!mediaObj && headerComp.example) {
+                            const handle = Array.isArray(headerComp.example.header_handle) ? headerComp.example.header_handle[0] : headerComp.example.header_handle;
+                            const u = Array.isArray(headerComp.example.header_url) ? headerComp.example.header_url[0] : headerComp.example.header_url;
+                            if (handle) mediaObj = formatMetaMediaObject(handle, req);
+                            else if (u) mediaObj = formatMetaMediaObject(u, req);
+                        }
 
                         if (mediaObj) {
                             componentsPayload.push({
@@ -186,34 +238,24 @@ module.exports = async (req, res) => {
                 // Strategy 2: Fallback variation trials if template metadata was unavailable or failed
                 if (!responseData) {
                     const baseHeaderComp = [];
-                    if (resolvedHeader && resolvedHeader.mediaObj) {
-                        baseHeaderComp.push({
-                            type: "header",
-                            parameters: [{
-                                type: resolvedHeader.format,
-                                [resolvedHeader.format]: resolvedHeader.mediaObj
-                            }]
-                        });
-                    } else if (media_id) {
+                    let mediaObj = media_id ? formatMetaMediaObject(media_id, req) : templateDefaultMediaObj;
+                    if (mediaObj) {
                         const mType = (req.body.media_type || 'image').toLowerCase();
                         const isVid = (mType === 'video');
                         const isDoc = (mType === 'document');
                         const mediaFormat = isVid ? 'video' : (isDoc ? 'document' : 'image');
-                        const mediaObj = formatMetaMediaObject(media_id, req);
-                        if (mediaObj) {
-                            baseHeaderComp.push({
-                                type: "header",
-                                parameters: [{
-                                    type: mediaFormat,
-                                    [mediaFormat]: mediaObj
-                                }]
-                            });
-                        }
+                        baseHeaderComp.push({
+                            type: "header",
+                            parameters: [{
+                                type: mediaFormat,
+                                [mediaFormat]: mediaObj
+                            }]
+                        });
                     }
 
                     for (const langCode of langCodes) {
                         const variations = [
-                            // Variation 1: Clean static template (e.g. hello_world or no-var templates)
+                            // Variation 1: Clean static template
                             {
                                 name: template_name,
                                 language: { code: langCode },
@@ -291,7 +333,9 @@ module.exports = async (req, res) => {
                 sent++;
                 const wa_message_id = (data.messages && data.messages[0]) ? data.messages[0].id : 'sent_' + Date.now();
                 const saveContent = type === 'template' ? `[Template] ${template_name}` : content;
-                const savedMediaUrl = (type === 'template' && resolvedHeader) ? resolvedHeader.mediaUrl : (media_id || null);
+                const savedMediaUrl = (type === 'template') 
+                    ? ((mediaObjFormatted && mediaObjFormatted.link) ? mediaObjFormatted.link : defaultMediaUrl) 
+                    : (media_id || null);
                 await sql`
                     INSERT INTO messages (customer_id, direction, type, content, media_url, wa_message_id, status) 
                     VALUES (${cust.id}, 'outbound', ${type}, ${saveContent}, ${savedMediaUrl}, ${wa_message_id}, 'sent')
@@ -304,7 +348,7 @@ module.exports = async (req, res) => {
 
         // Log campaign
         const campaignContent = type === 'template' ? `Template: ${template_name}` : content;
-        const campaignMedia = (type === 'template' && resolvedHeader) ? resolvedHeader.mediaUrl : (media_id || null);
+        const campaignMedia = (type === 'template') ? (media_id || defaultMediaUrl) : (media_id || null);
         await sql`
             INSERT INTO campaigns (name, message_type, content, media_url, sent_count, failed_count) 
             VALUES (${'Broadcast ' + new Date().toISOString()}, ${type}, ${campaignContent}, ${campaignMedia}, ${sent}, ${failed})
