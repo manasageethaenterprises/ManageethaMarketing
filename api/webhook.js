@@ -14,7 +14,7 @@ module.exports = async (req, res) => {
     if (mode === "subscribe") {
       res.setHeader("Content-Type", "text/plain");
       // Check verify token against configured value or default tokens
-      if (!token || token.trim() === verifyToken || token.trim() === 'manasageetha' || token.trim() === 'manageetha') {
+      if (!token || token.trim() === verifyToken || token.trim() === 'manageetha' || token.trim() === 'manageetha') {
         console.log("Webhook verified successfully!");
         return res.status(200).send(String(challenge));
       }
