@@ -57,7 +57,7 @@ module.exports = async (req, res) => {
                     console.log("META WEBHOOK DELIVERY FAILURE:", JSON.stringify(statusObj.errors, null, 2));
                     await sql`
                       UPDATE messages 
-                      SET status = ${status}, content = CONCAT(content, ${errDetails}) 
+                      SET status = ${status}, content = COALESCE(content, '') || ' ' || ${errDetails}::text 
                       WHERE wa_message_id = ${cleanId} 
                          OR wa_message_id = ${wamidPrefixed} 
                          OR wa_message_id = ${rawId}
