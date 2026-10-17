@@ -20,11 +20,11 @@ function formatMetaMediaObject(media_id, req) {
         return { id: str };
     }
 
-    // 3. Route Meta internal CDN URLs (scontent/fbcdn) through our media-proxy so Meta Cloud API downloads without 403 Forbidden
+    // 3. Route Meta internal CDN URLs (scontent/fbcdn) through our media proxy so Meta Cloud API downloads without 403 Forbidden
     if (str.includes('scontent.whatsapp.net') || str.includes('fbcdn.net') || str.includes('scontent.') || str.includes('lookaside.fbsbx.com')) {
         const host = (req && req.headers && req.headers['host']) || 'marketing.manageetha.in';
         const proto = (req && req.headers && req.headers['x-forwarded-proto']) || 'https';
-        return { link: `${proto}://${host}/api/media-proxy?url=${encodeURIComponent(str)}` };
+        return { link: `${proto}://${host}/api/media?action=proxy&url=${encodeURIComponent(str)}` };
     }
 
     // 4. Other absolute public URLs
