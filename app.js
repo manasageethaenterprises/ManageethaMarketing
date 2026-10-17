@@ -2852,6 +2852,8 @@ function checkSelectedTemplateMediaRequirement() {
     const mediaGroup = document.getElementById('bc-media-group');
     if (!mediaGroup) return;
 
+    let banner = document.getElementById('bc-template-auto-header-banner');
+
     if (type === 'template') {
         const tSel = document.getElementById('bc-template');
         const selectedName = tSel ? tSel.value : null;
@@ -2860,13 +2862,46 @@ function checkSelectedTemplateMediaRequirement() {
 
         if (headerComp && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerComp.format)) {
             const mediaFormat = headerComp.format.toLowerCase();
+            const metaExampleUrl = headerComp.example?.header_handle?.[0] || headerComp.example?.header_url?.[0];
             mediaGroup.style.display = 'block';
             const label = mediaGroup.querySelector('label');
-            if (label) label.textContent = `Attach Template Header ${headerComp.format} (Required by Meta)`;
+
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'bc-template-auto-header-banner';
+                mediaGroup.insertBefore(banner, mediaGroup.querySelector('.file-dropzone') || mediaGroup.firstChild);
+            }
+
+            if (metaExampleUrl) {
+                if (label) label.textContent = `Attached Template Header ${headerComp.format}:`;
+                banner.style.display = 'block';
+                banner.innerHTML = `
+                    <div style="background:rgba(16, 185, 129, 0.1); border:1px solid rgba(16, 185, 129, 0.3); border-radius:8px; padding:0.65rem; margin-bottom:0.75rem; display:flex; align-items:center; gap:0.75rem;">
+                        <div style="width:52px; height:52px; border-radius:6px; overflow:hidden; flex-shrink:0; background:var(--bg-dark); cursor:pointer;" onclick="openMediaPreview('${escapeAttr(metaExampleUrl)}', ${mediaFormat === 'video'}, '${escapeAttr(selectedName)}')">
+                            ${mediaFormat === 'video' 
+                                ? `<video src="${metaExampleUrl}" style="width:100%; height:100%; object-fit:cover;"></video>` 
+                                : `<img src="${metaExampleUrl}" alt="Template Header" style="width:100%; height:100%; object-fit:cover;">`}
+                        </div>
+                        <div style="flex:1; min-width:0;">
+                            <div style="color:#10b981; font-weight:600; font-size:0.82rem; display:flex; align-items:center; gap:0.3rem;">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                <span>Meta Approved Header Attached Automatically</span>
+                            </div>
+                            <span style="font-size:0.73rem; color:var(--text-muted); display:block; margin-top:0.15rem;">Attached from Meta template. Choose or upload below only if you want to override.</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                if (label) label.textContent = `Attach Template Header ${headerComp.format} (Required by Meta)`;
+                banner.style.display = 'none';
+            }
+
             loadMediaForSelect(mediaFormat === 'video' ? 'video' : 'image');
             return;
         }
     }
+
+    if (banner) banner.style.display = 'none';
 
     if (type !== 'image' && type !== 'video') {
         mediaGroup.style.display = 'none';
@@ -3180,6 +3215,7 @@ document.getElementById('broadcast-form')?.addEventListener('submit', async (e) 
                 media_type = headerComp.format.toLowerCase();
                 const librarySelectedUrl = document.getElementById('bc-media-select')?.value;
                 const fileInput = document.getElementById('bc-media');
+                const metaExampleUrl = headerComp.example?.header_handle?.[0] || headerComp.example?.header_url?.[0];
 
                 if (librarySelectedUrl) {
                     media_id = librarySelectedUrl;
@@ -3194,6 +3230,11 @@ document.getElementById('broadcast-form')?.addEventListener('submit', async (e) 
                     });
                     media_id = metaData.id;
                     syncToGithubBackground(file, config);
+                } else if (metaExampleUrl) {
+                    // Auto-attach related content header from Meta!
+                    media_id = metaExampleUrl;
+                } else {
+                    throw new Error(`Template "${template_name}" requires a header ${headerComp.format.toLowerCase()} file. Please select or upload a media file.`);
                 }
             }
         }
@@ -3725,6 +3766,124 @@ function getChatDateHeader(dateStr) {
     }
 }
 
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function escapeAttr(str) {
+    if (!str) return '';
+    return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function formatWhatsAppText(text) {
+    if (!text) return '';
+    let safe = escapeHtml(text);
+    // WhatsApp Markdown Formatting
+    safe = safe.replace(/\*([^*\n\r]+)\*/g, '<strong>$1</strong>');
+    safe = safe.replace(/_([^_<\n\r]+)_/g, '<em>$1</em>');
+    safe = safe.replace(/~([^~<\n\r]+)~/g, '<del>$1</del>');
+    safe = safe.replace(/\r?\n/g, '<br>');
+    return safe;
+}
+
+function renderTemplateMessageBubble(m, timeStr, tickHtml) {
+    const rawContent = (m.content || '').trim();
+    // Extract template name: e.g. from "[Template] vinayaka_chavithi" or "vinayaka_chavithi"
+    const templateName = rawContent.replace(/^\[Template\]\s*/i, '').trim();
+    
+    // Find matching template in cache
+    const tmpl = (templatesCache || []).find(t => t.name && t.name.toLowerCase() === templateName.toLowerCase());
+
+    const headerComp = tmpl?.components?.find(c => c.type === 'HEADER');
+    const bodyComp = tmpl?.components?.find(c => c.type === 'BODY');
+    const footerComp = tmpl?.components?.find(c => c.type === 'FOOTER');
+    const buttonsComp = tmpl?.components?.find(c => c.type === 'BUTTONS');
+
+    // 1. Header Media or Text
+    let headerHtml = '';
+    const headerFormat = (headerComp?.format || (m.media_url ? 'IMAGE' : '')).toUpperCase();
+    const mediaSrc = m.media_url || headerComp?.example?.header_handle?.[0] || headerComp?.example?.header_url?.[0];
+
+    if (headerFormat === 'IMAGE' && mediaSrc) {
+        headerHtml = `
+            <div class="chat-tpl-header-media" onclick="openMediaPreview('${escapeAttr(mediaSrc)}', false, '${escapeAttr(templateName)}')" title="Click to view full image">
+                <img src="${escapeAttr(mediaSrc)}" alt="${escapeAttr(templateName)}" loading="lazy" />
+                <div class="chat-tpl-zoom-badge">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+                    <span>View Image</span>
+                </div>
+            </div>
+        `;
+    } else if (headerFormat === 'VIDEO' && mediaSrc) {
+        headerHtml = `
+            <div class="chat-tpl-header-media video">
+                <video src="${escapeAttr(mediaSrc)}" controls preload="metadata"></video>
+            </div>
+        `;
+    } else if (headerFormat === 'TEXT' && headerComp?.text) {
+        headerHtml = `<div class="chat-tpl-header-text">${escapeHtml(headerComp.text)}</div>`;
+    }
+
+    // 2. Body Text
+    let bodyText = bodyComp?.text || '';
+    if (bodyText) {
+        const custName = (activeCustomerData && activeCustomerData.name && activeCustomerData.name.trim()) 
+            ? activeCustomerData.name.trim() 
+            : 'Customer';
+        // Replace named parameters e.g. {{customer_name}} or {{1}}
+        bodyText = bodyText.replace(/\{\{\s*(?:customer_name|name|1)\s*\}\}/gi, custName);
+        bodyText = bodyText.replace(/\{\{\s*\d+\s*\}\}/g, custName);
+    } else {
+        bodyText = rawContent;
+    }
+
+    const bodyHtml = `<div class="chat-tpl-body">${formatWhatsAppText(bodyText)}</div>`;
+
+    // 3. Footer Text
+    let footerHtml = '';
+    if (footerComp && footerComp.text) {
+        footerHtml = `<div class="chat-tpl-footer">${escapeHtml(footerComp.text)}</div>`;
+    }
+
+    // 4. Interactive Quick Reply / CTA Buttons
+    let buttonsHtml = '';
+    if (buttonsComp && Array.isArray(buttonsComp.buttons) && buttonsComp.buttons.length > 0) {
+        buttonsHtml = `
+            <div class="chat-tpl-buttons">
+                ${buttonsComp.buttons.map(b => `
+                    <div class="chat-tpl-btn">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 10 20 15 15 20"></polyline><path d="M4 4v7a4 4 0 0 0 4 4h12"></path></svg>
+                        <span>${escapeHtml(b.text || b.title || 'Option')}</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    return `
+        <div class="message-bubble ${m.direction} chat-tpl-bubble">
+            <div class="chat-tpl-badge">
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                <span>WhatsApp Template • ${escapeHtml(templateName)}</span>
+            </div>
+            ${headerHtml}
+            ${bodyHtml}
+            ${footerHtml}
+            ${buttonsHtml}
+            <div class="msg-meta">
+                <span>${timeStr}</span>
+                ${tickHtml}
+            </div>
+        </div>
+    `;
+}
+
 let lastChatMsgCount = 0;
 let lastChatLatestMsgId = null;
 
@@ -3737,6 +3896,26 @@ async function fetchChatMessages(isInitial = false) {
         lastChatMsgCount = 0;
         lastChatLatestMsgId = null;
         chatContainer.innerHTML = `<div class="loading-spinner-container"><div class="spinner-icon"></div><span>Loading conversation history...</span></div>`;
+    }
+
+    // Ensure templates are preloaded in templatesCache for rendering template bubbles
+    if (!templatesCache || templatesCache.length === 0) {
+        try {
+            const cached = sessionStorage.getItem('mg_templates_cache');
+            if (cached) templatesCache = JSON.parse(cached);
+        } catch(e) {}
+        if (!templatesCache || templatesCache.length === 0) {
+            try {
+                const tRes = await fetch('/api/templates');
+                const tData = await tRes.json();
+                if (Array.isArray(tData)) {
+                    templatesCache = tData;
+                    try { sessionStorage.setItem('mg_templates_cache', JSON.stringify(tData)); } catch(e) {}
+                }
+            } catch(e) {
+                console.warn('Could not load templates for chat:', e);
+            }
+        }
     }
 
     try {
@@ -3789,25 +3968,59 @@ async function fetchChatMessages(isInitial = false) {
             const timeStr = formatTime(m.created_at);
             const tickHtml = renderTick(m.status, m.direction);
 
-            let contentHtml = m.content || '';
-            if (contentHtml === '[button]' || contentHtml === '[Button]' || contentHtml === 'button' || contentHtml === '[button reply]' || contentHtml === 'Button Clicked') {
-                contentHtml = `<span style="display:inline-flex;align-items:center;gap:0.35rem;background:rgba(16,185,129,0.12);color:#10b981;padding:0.25rem 0.55rem;border-radius:6px;font-weight:600;font-size:0.8rem;">🔘 Quick Reply Button Clicked</span>`;
-            } else if (contentHtml.startsWith('[button]')) {
-                const btnText = contentHtml.replace('[button]', '').trim();
-                contentHtml = `<span style="display:inline-flex;align-items:center;gap:0.35rem;background:rgba(16,185,129,0.12);color:#10b981;padding:0.25rem 0.55rem;border-radius:6px;font-weight:600;font-size:0.8rem;">🔘 Tapped: "${btnText || 'Quick Reply'}"</span>`;
-            } else if (m.type === 'button' || m.type === 'interactive') {
-                contentHtml = `<span style="display:inline-flex;align-items:center;gap:0.35rem;background:rgba(16,185,129,0.12);color:#10b981;padding:0.25rem 0.55rem;border-radius:6px;font-weight:600;font-size:0.8rem;">🔘 Tapped: "${contentHtml}"</span>`;
-            }
+            const isTemplate = m.type === 'template' || (m.content && m.content.trim().startsWith('[Template]'));
 
-            row.innerHTML = `
-                <div class="message-bubble ${m.direction}">
-                    <div class="msg-content">${contentHtml}</div>
-                    <div class="msg-meta">
-                        <span>${timeStr}</span>
-                        ${tickHtml}
+            if (isTemplate) {
+                row.innerHTML = renderTemplateMessageBubble(m, timeStr, tickHtml);
+            } else if (m.type === 'image' && m.media_url) {
+                row.innerHTML = `
+                    <div class="message-bubble ${m.direction} media-bubble">
+                        <div class="chat-media-wrapper" onclick="openMediaPreview('${escapeAttr(m.media_url)}', false, 'Shared Image')">
+                            <img src="${escapeAttr(m.media_url)}" alt="WhatsApp Image" loading="lazy" />
+                        </div>
+                        ${m.content && m.content !== '[Image]' ? `<div class="msg-content" style="margin-top:0.35rem;">${formatWhatsAppText(m.content)}</div>` : ''}
+                        <div class="msg-meta">
+                            <span>${timeStr}</span>
+                            ${tickHtml}
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else if (m.type === 'video' && m.media_url) {
+                row.innerHTML = `
+                    <div class="message-bubble ${m.direction} media-bubble">
+                        <div class="chat-media-wrapper">
+                            <video src="${escapeAttr(m.media_url)}" controls preload="metadata"></video>
+                        </div>
+                        ${m.content && m.content !== '[Video]' ? `<div class="msg-content" style="margin-top:0.35rem;">${formatWhatsAppText(m.content)}</div>` : ''}
+                        <div class="msg-meta">
+                            <span>${timeStr}</span>
+                            ${tickHtml}
+                        </div>
+                    </div>
+                `;
+            } else {
+                let contentHtml = m.content || '';
+                if (contentHtml === '[button]' || contentHtml === '[Button]' || contentHtml === 'button' || contentHtml === '[button reply]' || contentHtml === 'Button Clicked') {
+                    contentHtml = `<span style="display:inline-flex;align-items:center;gap:0.35rem;background:rgba(16,185,129,0.12);color:#10b981;padding:0.25rem 0.55rem;border-radius:6px;font-weight:600;font-size:0.8rem;">🔘 Quick Reply Button Clicked</span>`;
+                } else if (contentHtml.startsWith('[button]')) {
+                    const btnText = contentHtml.replace('[button]', '').trim();
+                    contentHtml = `<span style="display:inline-flex;align-items:center;gap:0.35rem;background:rgba(16,185,129,0.12);color:#10b981;padding:0.25rem 0.55rem;border-radius:6px;font-weight:600;font-size:0.8rem;">🔘 Tapped: "${btnText || 'Quick Reply'}"</span>`;
+                } else if (m.type === 'button' || m.type === 'interactive') {
+                    contentHtml = `<span style="display:inline-flex;align-items:center;gap:0.35rem;background:rgba(16,185,129,0.12);color:#10b981;padding:0.25rem 0.55rem;border-radius:6px;font-weight:600;font-size:0.8rem;">🔘 Tapped: "${escapeHtml(contentHtml)}"</span>`;
+                } else {
+                    contentHtml = formatWhatsAppText(contentHtml);
+                }
+
+                row.innerHTML = `
+                    <div class="message-bubble ${m.direction}">
+                        <div class="msg-content">${contentHtml}</div>
+                        <div class="msg-meta">
+                            <span>${timeStr}</span>
+                            ${tickHtml}
+                        </div>
+                    </div>
+                `;
+            }
             chatContainer.appendChild(row);
         });
 
@@ -3902,13 +4115,29 @@ document.getElementById('btn-inbox-send-template')?.addEventListener('click', as
                 </select>
 
                 <div id="modal-template-media-group" style="display:none; margin-top:0.75rem;">
-                    <label id="modal-template-media-label" style="font-size:0.85rem; color:var(--text-muted); display:block; margin-bottom:0.35rem;">Attach Template Header Media:</label>
-                    <select id="modal-template-media-select" style="width:100%; padding:0.6rem; border-radius:6px; background:var(--bg-dark); color:var(--text-main); border:1px solid var(--border); margin-bottom:0.5rem;">
-                        <option value="">-- Choose from uploaded media --</option>
-                    </select>
-                    <div class="file-dropzone" id="modal-dropzone-box" style="padding:0.6rem; text-align:center; border:1px dashed var(--border); border-radius:6px; cursor:pointer;">
-                        <span id="modal-dropzone-text" style="font-size:0.8rem; color:var(--text-muted);">Click to browse and upload media file</span>
-                        <input type="file" id="modal-template-media-file" accept="image/*,video/*" style="display:none">
+                    <div id="modal-meta-header-banner" style="display:none; background:rgba(16, 185, 129, 0.1); border:1px solid rgba(16, 185, 129, 0.3); border-radius:8px; padding:0.75rem; margin-bottom:0.6rem;">
+                        <div style="display:flex; align-items:center; gap:0.4rem; color:#10b981; font-weight:600; font-size:0.84rem; margin-bottom:0.3rem;">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                            <span id="modal-meta-header-title">Meta Template Header Attached Automatically</span>
+                        </div>
+                        <p style="font-size:0.76rem; color:var(--text-muted); margin:0 0 0.5rem 0; line-height:1.4;">
+                            Meta's approved content header will be attached automatically when sending. No need to upload again.
+                        </p>
+                        <div id="modal-meta-header-preview" style="text-align:center; background:var(--bg-dark); border-radius:6px; padding:0.4rem; overflow:hidden;"></div>
+                        <button type="button" id="btn-toggle-modal-override" style="margin-top:0.5rem; background:transparent; border:none; color:var(--primary); font-size:0.78rem; cursor:pointer; text-decoration:underline; display:flex; align-items:center; gap:0.3rem; padding:0;">
+                            <span>Change or upload custom header media (Optional)</span>
+                        </button>
+                    </div>
+
+                    <div id="modal-custom-media-container" style="display:none; padding-top:0.35rem;">
+                        <label id="modal-template-media-label" style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:0.35rem;">Custom Media Attachment:</label>
+                        <select id="modal-template-media-select" style="width:100%; padding:0.6rem; border-radius:6px; background:var(--bg-dark); color:var(--text-main); border:1px solid var(--border); margin-bottom:0.5rem;">
+                            <option value="">-- Choose from uploaded media --</option>
+                        </select>
+                        <div class="file-dropzone" id="modal-dropzone-box" style="padding:0.6rem; text-align:center; border:1px dashed var(--border); border-radius:6px; cursor:pointer;">
+                            <span id="modal-dropzone-text" style="font-size:0.8rem; color:var(--text-muted);">Click to browse and upload custom media file</span>
+                            <input type="file" id="modal-template-media-file" accept="image/*,video/*" style="display:none">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3931,6 +4160,7 @@ document.getElementById('btn-inbox-send-template')?.addEventListener('click', as
                 media_type = headerComp.format.toLowerCase();
                 const mediaSelect = document.getElementById('modal-template-media-select');
                 const fileInput = document.getElementById('modal-template-media-file');
+                const metaExampleUrl = headerComp?.example?.header_handle?.[0] || headerComp?.example?.header_url?.[0];
 
                 if (mediaSelect && mediaSelect.value) {
                     media_id = mediaSelect.value;
@@ -3941,9 +4171,10 @@ document.getElementById('btn-inbox-send-template')?.addEventListener('click', as
                     const metaData = await uploadMediaToMetaFast(file, config);
                     media_id = metaData.id;
                     syncToGithubBackground(file, config);
-                }
-
-                if (!media_id) {
+                } else if (metaExampleUrl) {
+                    // Auto-attach related content header from Meta!
+                    media_id = metaExampleUrl;
+                } else {
                     showModal('Media Required', `Template "${templateName}" requires a header ${headerComp.format.toLowerCase()} file. Please select an uploaded file or upload a new file before sending.`);
                     return;
                 }
@@ -3978,6 +4209,17 @@ document.getElementById('btn-inbox-send-template')?.addEventListener('click', as
             const fileInput = document.getElementById('modal-template-media-file');
             const dropzoneText = document.getElementById('modal-dropzone-text');
             const mediaSelect = document.getElementById('modal-template-media-select');
+            const btnToggleOverride = document.getElementById('btn-toggle-modal-override');
+            const customMediaBox = document.getElementById('modal-custom-media-container');
+
+            if (btnToggleOverride && customMediaBox) {
+                btnToggleOverride.onclick = (e) => {
+                    e.preventDefault();
+                    const isHidden = customMediaBox.style.display === 'none';
+                    customMediaBox.style.display = isHidden ? 'block' : 'none';
+                    btnToggleOverride.textContent = isHidden ? '▲ Hide custom media options' : '✏️ Change or upload custom header media (Optional)';
+                };
+            }
 
             if (dropzoneBox && fileInput) {
                 dropzoneBox.onclick = () => fileInput.click();
@@ -3996,12 +4238,35 @@ document.getElementById('btn-inbox-send-template')?.addEventListener('click', as
                 const tmpl = templates.find(t => t.name === selName);
                 const headerComp = tmpl && tmpl.components ? tmpl.components.find(c => c.type === 'HEADER') : null;
                 const mg = document.getElementById('modal-template-media-group');
+                if (!mg) return;
 
-                if (mg && headerComp && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerComp.format)) {
+                if (headerComp && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerComp.format)) {
                     const mFormat = headerComp.format.toLowerCase();
+                    const metaExampleUrl = headerComp?.example?.header_handle?.[0] || headerComp?.example?.header_url?.[0];
                     mg.style.display = 'block';
-                    const lbl = document.getElementById('modal-template-media-label');
-                    if (lbl) lbl.textContent = `Attach Template Header ${headerComp.format} (Required by Meta):`;
+
+                    const autoBanner = document.getElementById('modal-meta-header-banner');
+                    const autoPreview = document.getElementById('modal-meta-header-preview');
+                    const autoTitle = document.getElementById('modal-meta-header-title');
+                    const customContainer = document.getElementById('modal-custom-media-container');
+
+                    if (metaExampleUrl) {
+                        if (autoBanner) autoBanner.style.display = 'block';
+                        if (autoTitle) autoTitle.textContent = `Meta Approved Header ${headerComp.format} Attached Automatically`;
+                        if (autoPreview) {
+                            if (mFormat === 'video') {
+                                autoPreview.innerHTML = `<video src="${metaExampleUrl}" controls style="max-height:130px; border-radius:6px; max-width:100%; display:block; margin:0 auto;"></video>`;
+                            } else {
+                                autoPreview.innerHTML = `<img src="${metaExampleUrl}" alt="Template Header" style="max-height:130px; border-radius:6px; object-fit:cover; max-width:100%; display:block; margin:0 auto;">`;
+                            }
+                        }
+                        if (customContainer) customContainer.style.display = 'none';
+                    } else {
+                        if (autoBanner) autoBanner.style.display = 'none';
+                        if (customContainer) customContainer.style.display = 'block';
+                        const lbl = document.getElementById('modal-template-media-label');
+                        if (lbl) lbl.textContent = `Attach Template Header ${headerComp.format} (Required by Meta):`;
+                    }
 
                     try {
                         const mRes = await fetch('/api/media');
@@ -4015,7 +4280,7 @@ document.getElementById('btn-inbox-send-template')?.addEventListener('click', as
                     } catch(e) {
                         console.error('Failed to load media for template select modal:', e);
                     }
-                } else if (mg) {
+                } else {
                     mg.style.display = 'none';
                 }
             };

@@ -1,33 +1,5 @@
 const { getDb } = require('../lib/db');
-
-// Format media_id into Meta-compatible object: { id: <integer> } or { link: <url> }
-function formatMetaMediaObject(media_id, req) {
-    if (!media_id) return null;
-    const str = String(media_id).trim();
-    if (!str) return null;
-
-    // Filter out Meta internal CDN links that cannot be fetched publicly by Meta Cloud API
-    if (str.includes('scontent.whatsapp.net') || str.includes('scontent.') || str.includes('fbcdn.net')) {
-        return null;
-    }
-
-    if (/^\d+$/.test(str)) {
-        const num = parseInt(str, 10);
-        if (!isNaN(num) && num < Number.MAX_SAFE_INTEGER) {
-            return { id: num };
-        }
-        return { id: str };
-    }
-
-    let fullUrl = str;
-    if (!str.startsWith('http://') && !str.startsWith('https://')) {
-        const host = (req && req.headers && req.headers['host']) || 'marketing.inspenox.in';
-        const proto = (req && req.headers && req.headers['x-forwarded-proto']) || 'https';
-        const cleanPath = str.startsWith('/') ? str : '/' + str;
-        fullUrl = `${proto}://${host}${cleanPath}`;
-    }
-    return { link: fullUrl };
-}
+const { formatMetaMediaObject, resolveTemplateHeaderMedia } = require('../lib/meta-template');
 
 module.exports = async (req, res) => {
     if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
@@ -48,7 +20,28 @@ module.exports = async (req, res) => {
 
         const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '1196613980211733';
         const token = process.env.WHATSAPP_ACCESS_TOKEN;
+        const wabaId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
         const url = `https://graph.facebook.com/v19.0/${phoneId}/messages`;
+
+        let templateMeta = null;
+        let resolvedHeader = null;
+
+        // Fetch template metadata and auto-resolve header ONCE for the entire broadcast
+        if (type === 'template' && wabaId && token && template_name) {
+            try {
+                const metaRes = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/message_templates?name=${encodeURIComponent(template_name)}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const metaData = await metaRes.json();
+                if (metaData.data && metaData.data.length > 0) {
+                    templateMeta = metaData.data[0];
+                }
+            } catch (e) {
+                console.error('Failed to fetch template metadata for broadcast:', e);
+            }
+
+            resolvedHeader = await resolveTemplateHeaderMedia(templateMeta, media_id, req, phoneId, token);
+        }
 
         let sent = 0;
         let failed = 0;
@@ -83,23 +76,6 @@ module.exports = async (req, res) => {
 
             if (type === 'template') {
                 const custName = (cust.name && cust.name.trim()) ? cust.name.trim() : 'Customer';
-                const wabaId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
-                
-                // Fetch template metadata once from Meta WABA API if available
-                let templateMeta = null;
-                if (wabaId && token && template_name) {
-                    try {
-                        const metaRes = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/message_templates?name=${encodeURIComponent(template_name)}`, {
-                            headers: { 'Authorization': `Bearer ${token}` }
-                        });
-                        const metaData = await metaRes.json();
-                        if (metaData.data && metaData.data.length > 0) {
-                            templateMeta = metaData.data[0];
-                        }
-                    } catch (e) {
-                        console.error('Failed to fetch template metadata:', e);
-                    }
-                }
 
                 const primaryLang = template_language || (templateMeta ? templateMeta.language : 'en');
                 const langCodes = [primaryLang];
@@ -107,7 +83,6 @@ module.exports = async (req, res) => {
                 else if (primaryLang === 'en_US') langCodes.push('en');
 
                 let lastErr = null;
-                let missingMediaError = null;
 
                 // Build template payload dynamically based on Meta template definition
                 const buildPayloadObj = (langCode) => {
@@ -118,17 +93,7 @@ module.exports = async (req, res) => {
                     const headerComp = tmplComponents.find(c => c.type === 'HEADER');
                     if (headerComp && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerComp.format)) {
                         const format = headerComp.format.toLowerCase();
-                        let mediaObj = null;
-
-                        if (media_id) {
-                            mediaObj = formatMetaMediaObject(media_id, req);
-                        } else if (headerComp.example) {
-                            if (headerComp.example.header_handle && headerComp.example.header_handle[0]) {
-                                mediaObj = formatMetaMediaObject(headerComp.example.header_handle[0], req);
-                            } else if (headerComp.example.header_url && headerComp.example.header_url[0]) {
-                                mediaObj = formatMetaMediaObject(headerComp.example.header_url[0], req);
-                            }
-                        }
+                        const mediaObj = resolvedHeader ? resolvedHeader.mediaObj : formatMetaMediaObject(media_id, req);
 
                         if (mediaObj) {
                             componentsPayload.push({
@@ -138,8 +103,6 @@ module.exports = async (req, res) => {
                                     [format]: mediaObj
                                 }]
                             });
-                        } else {
-                            missingMediaError = `Template '${template_name}' requires a header ${format} file. Please select or upload a media file.`;
                         }
                     }
 
@@ -223,7 +186,15 @@ module.exports = async (req, res) => {
                 // Strategy 2: Fallback variation trials if template metadata was unavailable or failed
                 if (!responseData) {
                     const baseHeaderComp = [];
-                    if (media_id) {
+                    if (resolvedHeader && resolvedHeader.mediaObj) {
+                        baseHeaderComp.push({
+                            type: "header",
+                            parameters: [{
+                                type: resolvedHeader.format,
+                                [resolvedHeader.format]: resolvedHeader.mediaObj
+                            }]
+                        });
+                    } else if (media_id) {
                         const mType = (req.body.media_type || 'image').toLowerCase();
                         const isVid = (mType === 'video');
                         const isDoc = (mType === 'document');
@@ -320,9 +291,10 @@ module.exports = async (req, res) => {
                 sent++;
                 const wa_message_id = (data.messages && data.messages[0]) ? data.messages[0].id : 'sent_' + Date.now();
                 const saveContent = type === 'template' ? `[Template] ${template_name}` : content;
+                const savedMediaUrl = (type === 'template' && resolvedHeader) ? resolvedHeader.mediaUrl : (media_id || null);
                 await sql`
-                    INSERT INTO messages (customer_id, direction, type, content, wa_message_id, status) 
-                    VALUES (${cust.id}, 'outbound', ${type}, ${saveContent}, ${wa_message_id}, 'sent')
+                    INSERT INTO messages (customer_id, direction, type, content, media_url, wa_message_id, status) 
+                    VALUES (${cust.id}, 'outbound', ${type}, ${saveContent}, ${savedMediaUrl}, ${wa_message_id}, 'sent')
                 `;
             }
 
@@ -332,9 +304,10 @@ module.exports = async (req, res) => {
 
         // Log campaign
         const campaignContent = type === 'template' ? `Template: ${template_name}` : content;
+        const campaignMedia = (type === 'template' && resolvedHeader) ? resolvedHeader.mediaUrl : (media_id || null);
         await sql`
-            INSERT INTO campaigns (name, message_type, content, sent_count, failed_count) 
-            VALUES (${'Broadcast ' + new Date().toISOString()}, ${type}, ${campaignContent}, ${sent}, ${failed})
+            INSERT INTO campaigns (name, message_type, content, media_url, sent_count, failed_count) 
+            VALUES (${'Broadcast ' + new Date().toISOString()}, ${type}, ${campaignContent}, ${campaignMedia}, ${sent}, ${failed})
         `;
 
         return res.status(200).json({ success: true, sent, failed, errors });
