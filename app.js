@@ -2869,7 +2869,12 @@ function checkSelectedTemplateMediaRequirement() {
             if (!banner) {
                 banner = document.createElement('div');
                 banner.id = 'bc-template-auto-header-banner';
-                mediaGroup.insertBefore(banner, mediaGroup.querySelector('.file-dropzone') || mediaGroup.firstChild);
+                const label = mediaGroup.querySelector('label');
+                if (label && label.parentNode === mediaGroup) {
+                    label.insertAdjacentElement('afterend', banner);
+                } else {
+                    mediaGroup.prepend(banner);
+                }
             }
 
             if (metaExampleUrl) {
