@@ -44,7 +44,14 @@ module.exports = async (req, res) => {
         if (target === 'all') {
             customersToMessage = await sql`SELECT id, name, phone FROM customers`;
         } else if (Array.isArray(target)) {
-            customersToMessage = await sql`SELECT id, name, phone FROM customers WHERE id = ANY(${target})`;
+            const targetIds = target
+                .map(t => (typeof t === 'object' && t !== null) ? parseInt(t.id, 10) : parseInt(t, 10))
+                .filter(n => !isNaN(n));
+
+            if (targetIds.length === 0) {
+                return res.status(400).json({ error: 'No valid customer IDs provided' });
+            }
+            customersToMessage = await sql`SELECT id, name, phone FROM customers WHERE id = ANY(${targetIds})`;
         } else {
             return res.status(400).json({ error: 'Invalid target' });
         }

@@ -18,7 +18,54 @@ module.exports = async (req, res) => {
                 return res.status(500).json({ error: data.error.message || JSON.stringify(data.error) });
             }
 
-            return res.status(200).json(data.data || []);
+            const templates = (data.data || []).map(t => {
+                const headerComp = (t.components || []).find(c => c.type === 'HEADER');
+                let headerMedia = null;
+                if (headerComp && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerComp.format)) {
+                    let url = null;
+                    let handle = null;
+                    if (headerComp.example) {
+                        if (Array.isArray(headerComp.example.header_url) && headerComp.example.header_url[0]) {
+                            url = headerComp.example.header_url[0];
+                        } else if (typeof headerComp.example.header_url === 'string') {
+                            url = headerComp.example.header_url;
+                        }
+
+                        if (Array.isArray(headerComp.example.header_handle) && headerComp.example.header_handle[0]) {
+                            const h = headerComp.example.header_handle[0];
+                            if (h.startsWith('http://') || h.startsWith('https://')) {
+                                url = h;
+                            } else {
+                                handle = h;
+                            }
+                        } else if (typeof headerComp.example.header_handle === 'string') {
+                            const h = headerComp.example.header_handle;
+                            if (h.startsWith('http://') || h.startsWith('https://')) {
+                                url = h;
+                            } else {
+                                handle = h;
+                            }
+                        }
+                    }
+
+                    const formatLower = headerComp.format.toLowerCase();
+                    headerMedia = {
+                        format: formatLower,
+                        formatUpper: headerComp.format,
+                        url: url,
+                        handle: handle,
+                        media_id: handle || url || null,
+                        has_meta_media: !!(url || handle)
+                    };
+                }
+
+                return {
+                    ...t,
+                    header_media: headerMedia
+                };
+            });
+
+            return res.status(200).json(templates);
         } catch (error) {
             return res.status(500).json({ error: error.message });
         }
