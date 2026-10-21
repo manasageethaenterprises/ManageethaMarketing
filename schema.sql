@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS customers (
   name TEXT NOT NULL,
   phone TEXT NOT NULL UNIQUE,
   status TEXT DEFAULT 'Open - Not Contacted',
+  description TEXT DEFAULT '',
   is_saved BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );

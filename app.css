@@ -3615,3 +3615,170 @@ tr:hover td {
         padding: 0.65rem 0.75rem;
     }
 }
+
+/* ==========================================================================
+   Customer Conversation Notes & Descriptions
+   ========================================================================== */
+
+/* Notes Input in Add/Edit Form */
+.customer-form-desc-row {
+    width: 100%;
+}
+
+.customer-form-desc-row .input-with-icon input {
+    height: 40px;
+    width: 100%;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    padding-left: 2.75rem !important;
+}
+
+/* Notes Column in Customers Table */
+.cust-notes-td {
+    max-width: 280px;
+}
+
+.cust-notes-cell {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.35rem 0.55rem;
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
+    transition: background 0.15s ease, border-color 0.15s ease;
+    border: 1px solid transparent;
+}
+
+.cust-notes-cell:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+    border-color: var(--border);
+}
+
+.cust-notes-snippet {
+    font-size: 0.775rem;
+    color: var(--text-main);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-clamp: 2; 
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cust-notes-snippet.is-empty {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 0.75rem;
+}
+
+.cust-notes-edit-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0.6;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.cust-notes-cell:hover .cust-notes-edit-icon {
+    opacity: 1;
+    color: var(--primary);
+    background: rgba(0, 168, 132, 0.12);
+}
+
+.cust-notes-edit-icon svg {
+    width: 13px;
+    height: 13px;
+}
+
+/* Chat Header Notes Action Button */
+.btn-chat-notes {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.28rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    background: var(--bg-card);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+    transition: all 0.2s ease;
+}
+
+.btn-chat-notes:hover {
+    background: rgba(0, 168, 132, 0.12);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+/* Active Chat Conversation Note Strip */
+.chat-note-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.45rem 1rem;
+    background: rgba(0, 168, 132, 0.07);
+    border-bottom: 1px solid rgba(0, 168, 132, 0.2);
+    font-size: 0.775rem;
+    transition: all 0.2s ease;
+}
+
+.chat-note-content {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-note-tag {
+    font-weight: 700;
+    color: var(--primary, #00a884);
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+.chat-note-text {
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-note-text.is-empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.chat-note-edit-btn {
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    background: transparent;
+    border: 1px solid rgba(0, 168, 132, 0.35);
+    color: var(--primary, #00a884);
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.chat-note-edit-btn:hover {
+    background: var(--primary, #00a884);
+    color: #ffffff;
+}

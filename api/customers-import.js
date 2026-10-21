@@ -28,13 +28,18 @@ module.exports = async (req, res) => {
             const cleanPhone = formatIndiaPhone(cust.phone);
             const name = cust.name || 'Customer';
             const custStatus = cust.status || 'Open - Not Contacted';
+            const custDesc = cust.description || cust.notes || '';
             await sql`
-                INSERT INTO customers (name, phone, is_saved, status) 
-                VALUES (${name}, ${cleanPhone}, true, ${custStatus}) 
+                INSERT INTO customers (name, phone, is_saved, status, description) 
+                VALUES (${name}, ${cleanPhone}, true, ${custStatus}, ${custDesc}) 
                 ON CONFLICT (phone) DO UPDATE SET 
                     name = EXCLUDED.name, 
                     is_saved = true,
-                    status = COALESCE(customers.status, EXCLUDED.status)
+                    status = COALESCE(customers.status, EXCLUDED.status),
+                    description = CASE 
+                        WHEN EXCLUDED.description IS NOT NULL AND EXCLUDED.description != '' THEN EXCLUDED.description 
+                        ELSE customers.description 
+                    END
             `;
             added++;
         }

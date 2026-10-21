@@ -549,7 +549,7 @@ async function loadCustomers() {
         if(statEl) statEl.textContent = allCustomers.length;
     } catch (e) { 
         console.error('Error loading customers:', e);
-        if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="empty-state" style="height:100px;">Error loading data.</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="height:100px;">Error loading data.</td></tr>`;
     }
 }
 
@@ -560,7 +560,8 @@ function applyCustomerFilters() {
     filteredCustomers = allCustomers.filter(c => {
         const matchesQuery = (!query) ||
             (c.name && c.name.toLowerCase().includes(query)) || 
-            (c.phone && c.phone.toLowerCase().includes(query));
+            (c.phone && c.phone.toLowerCase().includes(query)) ||
+            (c.description && c.description.toLowerCase().includes(query));
         if (!matchesQuery) return false;
 
         if (statusFilter !== 'all') {
@@ -608,9 +609,7 @@ function renderCustomersTable() {
         const tr = document.createElement('tr');
         const custStatus = c.status || 'Open - Not Contacted';
         const statusKey = getStatusKey(custStatus);
-        const safeName = (c.name || 'Customer').replace(/'/g, "\\'");
-        const safePhone = (c.phone || '').replace(/'/g, "\\'");
-        const safeStatus = custStatus.replace(/'/g, "\\'");
+        const custDesc = c.description || '';
 
         tr.innerHTML = `
             <td>
@@ -632,9 +631,17 @@ function renderCustomersTable() {
                     <option value="Converted" ${custStatus === 'Converted' ? 'selected' : ''}>🟢 Converted</option>
                 </select>
             </td>
-            <td><span class="window-badge" style="background:var(--primary-light);color:var(--primary);">${c.message_count || 0} messages</span></td>
+            <td class="cust-notes-td">
+                <div class="cust-notes-cell" onclick="openCustomerNoteModal(${c.id})" title="Click to view or update conversation notes">
+                    <span class="cust-notes-snippet ${!custDesc ? 'is-empty' : ''}">${custDesc ? escapeHtml(custDesc) : '<em>+ Add conversation notes...</em>'}</span>
+                    <button type="button" class="cust-notes-edit-icon" title="Edit conversation notes">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                    </button>
+                </div>
+            </td>
+            <td><span class="window-badge" style="background:var(--primary-light);color:var(--primary);">${c.message_count || 0} msgs</span></td>
             <td style="text-align: right;">
-                <button class="btn secondary sm" onclick="editCustomer(${c.id}, '${safeName}', '${safePhone}', '${safeStatus}')">Edit</button>
+                <button class="btn secondary sm" onclick="editCustomer(${c.id})">Edit</button>
                 <button class="btn danger sm" onclick="deleteCustomer(${c.id})">Delete</button>
             </td>
         `;
@@ -642,7 +649,7 @@ function renderCustomersTable() {
     });
 
     if (totalItems === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="empty-state" style="height: 100px;">No matching customers found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="height: 100px;">No matching customers found.</td></tr>`;
     }
 
     if (pageInfo) {
@@ -678,14 +685,24 @@ window.deleteCustomer = (id) => {
     });
 };
 
-window.editCustomer = (id, name, phone, status) => {
-    document.getElementById('cust-id').value = id;
-    document.getElementById('cust-name').value = name;
-    document.getElementById('cust-phone').value = phone;
+window.editCustomer = (id) => {
+    const customer = (allCustomers || []).find(c => c.id === id);
+    if (!customer) return;
+
+    document.getElementById('cust-id').value = customer.id;
+    document.getElementById('cust-name').value = customer.name || '';
+    document.getElementById('cust-phone').value = customer.phone || '';
+    
     const statusSelect = document.getElementById('cust-status');
-    if (statusSelect && status) {
-        statusSelect.value = status;
+    if (statusSelect) {
+        statusSelect.value = customer.status || 'Open - Not Contacted';
     }
+
+    const descInput = document.getElementById('cust-description');
+    if (descInput) {
+        descInput.value = customer.description || '';
+    }
+
     document.getElementById('btn-save-cust').innerHTML = `<span>Update Customer</span>`;
     document.getElementById('btn-cancel-edit').style.display = 'inline-flex';
 };
@@ -695,6 +712,8 @@ document.getElementById('btn-cancel-edit')?.addEventListener('click', () => {
     document.getElementById('cust-id').value = '';
     const statusSelect = document.getElementById('cust-status');
     if (statusSelect) statusSelect.value = 'Open - Not Contacted';
+    const descInput = document.getElementById('cust-description');
+    if (descInput) descInput.value = '';
     document.getElementById('btn-save-cust').innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg><span>Add Customer</span>`;
     document.getElementById('btn-cancel-edit').style.display = 'none';
 });
@@ -705,12 +724,13 @@ document.getElementById('add-customer-form')?.addEventListener('submit', async (
     const name = document.getElementById('cust-name').value;
     const phone = formatIndiaPhone(document.getElementById('cust-phone').value);
     const status = document.getElementById('cust-status')?.value || 'Open - Not Contacted';
+    const description = document.getElementById('cust-description')?.value.trim() || '';
     
     const performSave = async () => {
         await fetch('/api/customers', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ id: custId || undefined, name, phone, status })
+            body: JSON.stringify({ id: custId || undefined, name, phone, status, description })
         });
         document.getElementById('btn-cancel-edit').click();
         loadCustomers();
@@ -729,6 +749,145 @@ document.getElementById('add-customer-form')?.addEventListener('submit', async (
             'I Confirm & Agree',
             'btn primary'
         );
+    }
+});
+
+// --- Quick Customer Conversation Note Modal & Sync Logic ---
+function syncChatNotesUI(customer) {
+    if (!customer) return;
+    const strip = document.getElementById('chat-note-strip');
+    const noteText = document.getElementById('chat-note-text');
+    if (strip && noteText) {
+        strip.style.display = 'flex';
+        if (customer.description && customer.description.trim()) {
+            noteText.textContent = customer.description;
+            noteText.className = 'chat-note-text';
+        } else {
+            noteText.textContent = 'No conversation notes recorded yet. Click "Edit Note" to log discussion.';
+            noteText.className = 'chat-note-text is-empty';
+        }
+    }
+}
+
+window.openCustomerNoteModal = (id) => {
+    const numId = parseInt(id, 10);
+    const customer = (allCustomers || []).find(c => c.id === numId || c.id === id) || 
+                     (inboxCustomersList || []).find(c => c.id === numId || c.id === id) ||
+                     (activeCustomerData && (activeCustomerData.id === numId || activeCustomerData.id === id) ? activeCustomerData : null);
+    if (!customer) return;
+
+    const modal = document.getElementById('cust-note-modal');
+    if (!modal) return;
+
+    const nameEl = document.getElementById('note-modal-name');
+    const phoneEl = document.getElementById('note-modal-phone');
+    if (nameEl) nameEl.textContent = customer.name || 'Customer';
+    if (phoneEl) phoneEl.textContent = formatDisplayPhone(customer.phone);
+
+    const statusSelect = document.getElementById('note-modal-status-select');
+    if (statusSelect) {
+        statusSelect.value = customer.status || 'Open - Not Contacted';
+    }
+
+    const textarea = document.getElementById('note-modal-textarea');
+    if (textarea) {
+        textarea.value = customer.description || '';
+        setTimeout(() => textarea.focus(), 60);
+    }
+
+    const closeModal = () => {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+    };
+
+    const closeBtn = document.getElementById('note-modal-close');
+    const cancelBtn = document.getElementById('note-modal-cancel');
+    if (closeBtn) closeBtn.onclick = closeModal;
+    if (cancelBtn) cancelBtn.onclick = closeModal;
+    modal.onclick = (e) => {
+        if (e.target === modal) closeModal();
+    };
+
+    const saveBtn = document.getElementById('note-modal-save');
+    if (saveBtn) {
+        saveBtn.onclick = async () => {
+            const newStatus = statusSelect ? statusSelect.value : customer.status;
+            const newNotes = textarea ? textarea.value.trim() : '';
+
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="spinner"></span> Saving...';
+
+            try {
+                const res = await fetch('/api/customers', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: customer.id, status: newStatus, description: newNotes })
+                });
+
+                if (!res.ok) throw new Error('Failed to update notes');
+
+                // Update in all local arrays
+                customer.status = newStatus;
+                customer.description = newNotes;
+
+                const matchAll = (allCustomers || []).find(c => c.id === customer.id);
+                if (matchAll) {
+                    matchAll.status = newStatus;
+                    matchAll.description = newNotes;
+                }
+                const matchFiltered = (filteredCustomers || []).find(c => c.id === customer.id);
+                if (matchFiltered) {
+                    matchFiltered.status = newStatus;
+                    matchFiltered.description = newNotes;
+                }
+                const matchInbox = (inboxCustomersList || []).find(c => c.id === customer.id);
+                if (matchInbox) {
+                    matchInbox.status = newStatus;
+                    matchInbox.description = newNotes;
+                }
+
+                renderCustomersTable();
+                if (typeof filterAndRenderInboxContacts === 'function') {
+                    filterAndRenderInboxContacts();
+                }
+
+                // If active in chat, sync chat header & strip
+                const activeCustId = document.getElementById('chat-active-customer')?.value;
+                if (activeCustId && String(activeCustId) === String(customer.id)) {
+                    syncChatNotesUI(customer);
+                    const chatHeaderSelect = document.getElementById('chat-header-status-select');
+                    if (chatHeaderSelect) {
+                        chatHeaderSelect.value = newStatus;
+                        chatHeaderSelect.className = `chat-header-status-select status-${getStatusKey(newStatus)}`;
+                    }
+                }
+
+                closeModal();
+            } catch (err) {
+                console.error(err);
+                showModal('Error', 'Could not save conversation notes: ' + err.message);
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                    <span>Save Notes</span>
+                `;
+            }
+        };
+    }
+
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+};
+
+document.getElementById('btn-chat-notes')?.addEventListener('click', () => {
+    if (activeInboxCustomer) {
+        openCustomerNoteModal(activeInboxCustomer);
+    }
+});
+document.getElementById('btn-edit-chat-strip-note')?.addEventListener('click', () => {
+    if (activeInboxCustomer) {
+        openCustomerNoteModal(activeInboxCustomer);
     }
 });
 
@@ -908,6 +1067,7 @@ function exportFilteredCustomers() {
             "Phone Number": cleanPhone,
             "Display Phone": formatDisplayPhone(c.phone),
             "Status": c.status || "Open - Not Contacted",
+            "Conversation Notes": c.description || "",
             "Messages Count": parseInt(c.message_count, 10) || 0,
             "Unread Messages": parseInt(c.unread_count, 10) || 0,
             "Date Added": createdDate,
@@ -931,7 +1091,8 @@ function exportFilteredCustomers() {
         { wch: 24 }, // Customer Name
         { wch: 16 }, // Phone Number
         { wch: 18 }, // Display Phone
-        { wch: 24 }, // Status
+        { wch: 22 }, // Status
+        { wch: 35 }, // Conversation Notes
         { wch: 16 }, // Messages Count
         { wch: 16 }, // Unread Messages
         { wch: 14 }, // Date Added
@@ -1080,24 +1241,24 @@ async function exportFilteredCustomersPdf() {
     // 3. Table Rows
     const tableData = filteredCustomers.map((c, index) => {
         const phoneFormatted = formatDisplayPhone(c.phone);
-        const createdDate = c.created_at ? new Date(c.created_at).toLocaleDateString() : '-';
         const msgCount = `${c.message_count || 0} msgs`;
         const custStatus = c.status || 'Open - Not Contacted';
+        const custDesc = c.description ? c.description.slice(0, 140) : '-';
 
         return [
             index + 1,
             c.name || 'Customer',
             phoneFormatted,
             custStatus,
-            msgCount,
-            createdDate
+            custDesc,
+            msgCount
         ];
     });
 
     // AutoTable Generation
     doc.autoTable({
         startY: 116,
-        head: [['S.No', 'Customer Name', 'Phone Number', 'Status', 'Messages', 'Date Added']],
+        head: [['S.No', 'Customer Name', 'Phone Number', 'Status', 'Conversation Notes', 'Messages']],
         body: tableData,
         theme: 'striped',
         margin: { left: 30, right: 30, bottom: 42 },
@@ -1121,11 +1282,11 @@ async function exportFilteredCustomersPdf() {
         },
         columnStyles: {
             0: { cellWidth: 26, halign: 'center' },
-            1: { cellWidth: 145, fontStyle: 'bold' },
-            2: { cellWidth: 105 },
-            3: { cellWidth: 125, fontStyle: 'bold' },
-            4: { cellWidth: 65, halign: 'center' },
-            5: { cellWidth: 65, halign: 'center' }
+            1: { cellWidth: 105, fontStyle: 'bold' },
+            2: { cellWidth: 90 },
+            3: { cellWidth: 105, fontStyle: 'bold' },
+            4: { cellWidth: 154 },
+            5: { cellWidth: 55, halign: 'center' }
         },
         didParseCell: function(data) {
             if (data.section === 'body' && data.column.index === 3) {
