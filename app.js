@@ -1028,28 +1028,54 @@ async function exportFilteredCustomersPdf() {
     doc.setDrawColor(218, 222, 226);
     doc.roundedRect(30, 68, pageWidth - 60, 36, 4, 4, 'S');
 
-    doc.setTextColor(40, 50, 60);
-    doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
+    const bannerY = 89;
+    let currentX = 42;
+
+    // Filter Status Label & Value
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(60, 70, 80);
+    doc.text('Filter Status:', currentX, bannerY);
+    currentX += doc.getTextWidth('Filter Status:') + 5;
 
     const filterText = statusFilter !== 'all' ? statusFilter : 'All Statuses';
-    doc.text('Filter Status:', 42, 84);
-    doc.setFont('helvetica', 'normal');
-    doc.text(filterText, 100, 84);
+    doc.setFont('helvetica', 'bold');
+    if (statusFilter === 'Open - Not Contacted') doc.setTextColor(37, 99, 235);
+    else if (statusFilter === 'Working - Contacted') doc.setTextColor(217, 119, 6);
+    else if (statusFilter === 'Closed - Not Converted') doc.setTextColor(100, 116, 139);
+    else if (statusFilter === 'Converted') doc.setTextColor(5, 150, 105);
+    else doc.setTextColor(0, 168, 132);
 
+    doc.text(filterText, currentX, bannerY);
+    currentX += doc.getTextWidth(filterText) + 16;
+
+    // Search Query (if any)
     if (searchQuery) {
         doc.setFont('helvetica', 'bold');
-        doc.text('Search Query:', 220, 84);
+        doc.setTextColor(60, 70, 80);
+        doc.text('Search:', currentX, bannerY);
+        currentX += doc.getTextWidth('Search:') + 4;
+
         doc.setFont('helvetica', 'normal');
-        doc.text(`"${searchQuery}"`, 285, 84);
+        doc.setTextColor(30, 40, 50);
+        const displayQuery = searchQuery.length > 20 ? searchQuery.slice(0, 18) + '...' : searchQuery;
+        doc.text(`"${displayQuery}"`, currentX, bannerY);
     }
 
+    // Total Records on the Right (calculated relative to right edge to prevent overlap)
+    const totalCountText = `${filteredCustomers.length} contact(s)`;
     doc.setFont('helvetica', 'bold');
-    doc.text('Total Records:', pageWidth - 125, 84);
-    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    const countWidth = doc.getTextWidth(totalCountText);
+    const rightEdge = pageWidth - 42;
+
+    // "Total Records: " right edge meets count's left edge
+    doc.setTextColor(60, 70, 80);
+    doc.text('Total Records: ', rightEdge - countWidth, bannerY, { align: 'right' });
+
+    // Count text aligned to rightEdge
     doc.setTextColor(0, 168, 132);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${filteredCustomers.length} contact(s)`, pageWidth - 42, 84, { align: 'right' });
+    doc.text(totalCountText, rightEdge, bannerY, { align: 'right' });
 
     // 3. Table Rows
     const tableData = filteredCustomers.map((c, index) => {
@@ -1071,7 +1097,7 @@ async function exportFilteredCustomersPdf() {
     // AutoTable Generation
     doc.autoTable({
         startY: 116,
-        head: [['#', 'Customer Name', 'Phone Number', 'Status', 'Messages', 'Date Added']],
+        head: [['S.No', 'Customer Name', 'Phone Number', 'Status', 'Messages', 'Date Added']],
         body: tableData,
         theme: 'striped',
         margin: { left: 30, right: 30, bottom: 42 },
