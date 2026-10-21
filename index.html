@@ -187,6 +187,10 @@
                         <p class="subtitle">Manage customer profiles, numbers, and bulk import contacts from Excel/CSV.</p>
                     </div>
                     <div class="header-actions">
+                        <button id="btn-export-customers" class="btn secondary" title="Export currently filtered customers to Excel">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            <span id="btn-export-customers-label">Export Filtered</span>
+                        </button>
                         <button id="btn-download-template" class="btn secondary">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                             Download Template
@@ -236,7 +240,7 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                         <input type="text" id="customers-search" placeholder="Search customer by name or phone number...">
                     </div>
-                    <div class="table-filter-group" style="display:flex; align-items:center; gap:0.5rem;">
+                    <div class="table-filter-group" style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
                         <span style="font-size:0.775rem; color:var(--text-muted); font-weight:600; white-space:nowrap;">Status:</span>
                         <select id="customers-status-filter" class="table-filter-select">
                             <option value="all">All Statuses</option>
@@ -245,6 +249,10 @@
                             <option value="Closed - Not Converted">⚪ Closed - Not Converted</option>
                             <option value="Converted">🟢 Converted</option>
                         </select>
+                        <button id="btn-export-customers-toolbar" class="btn secondary sm" style="gap:0.35rem; font-size:0.75rem; padding:0.4rem 0.75rem;" title="Export filtered customers to Excel">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            <span>Export</span>
+                        </button>
                     </div>
                     <div class="pagination-area">
                         <span id="customers-pagination-info" class="pagination-info">Showing 0 of 0</span>

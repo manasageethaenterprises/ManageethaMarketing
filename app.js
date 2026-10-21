@@ -534,6 +534,15 @@ function applyCustomerFilters() {
 
     currentCustomersPage = 1;
     renderCustomersTable();
+
+    // Dynamically update Export button label with filtered count
+    const exportLabel = document.getElementById('btn-export-customers-label');
+    if (exportLabel) {
+        const isFiltered = (statusFilter !== 'all') || Boolean(query);
+        exportLabel.textContent = isFiltered 
+            ? `Export Filtered (${filteredCustomers.length})` 
+            : `Export All (${filteredCustomers.length})`;
+    }
 }
 
 function renderCustomersTable() {
@@ -837,6 +846,78 @@ document.getElementById('btn-download-template')?.addEventListener('click', () =
     
     XLSX.writeFile(workbook, "Manageetha_customers_template.xlsx");
 });
+
+// --- Export Customers Based on Active Filter ---
+function exportFilteredCustomers() {
+    if (!filteredCustomers || filteredCustomers.length === 0) {
+        showModal('No Customers to Export', 'There are no customers matching your current filter criteria to export.');
+        return;
+    }
+
+    const statusFilter = document.getElementById('customers-status-filter')?.value || 'all';
+    const searchQuery = document.getElementById('customers-search')?.value.trim() || '';
+
+    // Prepare rows for Excel
+    const exportRows = filteredCustomers.map((c, index) => {
+        const cleanPhone = formatIndiaPhone(c.phone);
+        const createdDate = c.created_at ? new Date(c.created_at).toLocaleDateString() : '';
+        const lastMsgTime = c.last_message_at ? new Date(c.last_message_at).toLocaleString() : 'No messages';
+
+        return {
+            "Sr No": index + 1,
+            "Customer Name": c.name || "Customer",
+            "Phone Number": cleanPhone,
+            "Display Phone": formatDisplayPhone(c.phone),
+            "Status": c.status || "Open - Not Contacted",
+            "Messages Count": parseInt(c.message_count, 10) || 0,
+            "Unread Messages": parseInt(c.unread_count, 10) || 0,
+            "Date Added": createdDate,
+            "Last Conversation Activity": lastMsgTime
+        };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    const workbook = XLSX.utils.book_new();
+
+    // Sheet name (max 31 characters supported by Excel)
+    let sheetName = "Filtered Customers";
+    if (statusFilter !== 'all') {
+        sheetName = statusFilter.slice(0, 31);
+    }
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+
+    // Set auto column widths
+    worksheet['!cols'] = [
+        { wch: 8 },  // Sr No
+        { wch: 24 }, // Customer Name
+        { wch: 16 }, // Phone Number
+        { wch: 18 }, // Display Phone
+        { wch: 24 }, // Status
+        { wch: 16 }, // Messages Count
+        { wch: 16 }, // Unread Messages
+        { wch: 14 }, // Date Added
+        { wch: 26 }  // Last Conversation Activity
+    ];
+
+    // Build descriptive filename based on active filters
+    const nowStr = new Date().toISOString().slice(0, 10);
+    let filterSlug = 'all';
+    if (statusFilter !== 'all') {
+        filterSlug = statusFilter.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    } else if (searchQuery) {
+        filterSlug = 'search_' + searchQuery.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 15);
+    }
+
+    const filename = `Manageetha_Customers_${filterSlug}_${exportRows.length}_contacts_${nowStr}.xlsx`;
+    XLSX.writeFile(workbook, filename);
+
+    // Provide friendly confirmation
+    const filterDesc = statusFilter !== 'all' ? `status "${statusFilter}"` : (searchQuery ? `search "${searchQuery}"` : 'all contacts');
+    showModal('Export Successful', `Successfully exported ${exportRows.length} customer(s) based on ${filterDesc} to <strong>${filename}</strong>.`);
+}
+
+document.getElementById('btn-export-customers')?.addEventListener('click', exportFilteredCustomers);
+document.getElementById('btn-export-customers-toolbar')?.addEventListener('click', exportFilteredCustomers);
 
 
 
