@@ -417,11 +417,82 @@ if (history.replaceState) {
 switchView(savedView, false);
 
 
+// --- Lead Status Helpers ---
+function getStatusKey(status) {
+    if (!status) return 'open';
+    const s = String(status).toLowerCase();
+    if (s.includes('working')) return 'working';
+    if (s.includes('closed')) return 'closed';
+    if (s.includes('converted')) return 'converted';
+    return 'open';
+}
+
+function getStatusShort(status) {
+    if (!status) return 'Open';
+    const s = String(status).toLowerCase();
+    if (s.includes('working')) return 'Working';
+    if (s.includes('closed')) return 'Closed';
+    if (s.includes('converted')) return 'Converted';
+    return 'Open';
+}
+
+window.updateCustomerStatus = async function updateCustomerStatus(id, newStatus, selectEl = null) {
+    if (!id || !newStatus) return;
+
+    const numId = parseInt(id, 10);
+    const key = getStatusKey(newStatus);
+
+    if (selectEl) {
+        selectEl.className = selectEl.classList.contains('chat-header-status-select')
+            ? `chat-header-status-select status-${key}`
+            : `status-select-badge status-${key}`;
+    }
+
+    // Optimistic local state updates
+    const targetCust = (allCustomers || []).find(c => c.id === numId || c.id === id);
+    if (targetCust) targetCust.status = newStatus;
+
+    const targetFiltered = (filteredCustomers || []).find(c => c.id === numId || c.id === id);
+    if (targetFiltered) targetFiltered.status = newStatus;
+
+    const inboxCust = (inboxCustomersList || []).find(c => c.id === numId || c.id === id);
+    if (inboxCust) inboxCust.status = newStatus;
+
+    if (activeCustomerData && (activeCustomerData.id === numId || activeCustomerData.id === id)) {
+        activeCustomerData.status = newStatus;
+        const chatHeaderSelect = document.getElementById('chat-header-status-select');
+        if (chatHeaderSelect && chatHeaderSelect !== selectEl) {
+            chatHeaderSelect.value = newStatus;
+            chatHeaderSelect.className = `chat-header-status-select status-${key}`;
+        }
+    }
+
+    // Refresh inbox contacts list and sidebar cards
+    if (typeof filterAndRenderInboxContacts === 'function') {
+        filterAndRenderInboxContacts();
+    }
+
+    try {
+        const res = await fetch('/api/customers', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: numId || id, status: newStatus })
+        });
+        const data = await res.json();
+        if (data.error) {
+            throw new Error(data.error);
+        }
+    } catch (err) {
+        console.error('Failed to update status:', err);
+        showModal('Status Update Error', 'Could not update customer status: ' + err.message);
+    }
+};
+
 // --- Customers Logic ---
 async function loadCustomers() {
     const tbody = document.getElementById('customers-table-body');
     if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="4"><div class="loading-spinner-container"><div class="spinner-icon"></div><span>Loading customer directory...</span></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5"><div class="loading-spinner-container"><div class="spinner-icon"></div><span>Loading customer directory...</span></div></td></tr>`;
     }
     try {
         const res = await fetch('/api/customers');
@@ -429,22 +500,40 @@ async function loadCustomers() {
         
         if (customers.error) {
             console.error('API Error:', customers.error);
-            if (tbody) tbody.innerHTML = `<tr><td colspan="4" class="empty-state" style="height:100px;">Failed to load customers.</td></tr>`;
+            if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="empty-state" style="height:100px;">Failed to load customers.</td></tr>`;
             return;
         }
         
         allCustomers = Array.isArray(customers) ? customers : [];
-        filteredCustomers = [...allCustomers];
-        currentCustomersPage = 1;
+        applyCustomerFilters();
         
         const statEl = document.getElementById('dash-stat-customers');
         if(statEl) statEl.textContent = allCustomers.length;
-
-        renderCustomersTable();
     } catch (e) { 
         console.error('Error loading customers:', e);
-        if (tbody) tbody.innerHTML = `<tr><td colspan="4" class="empty-state" style="height:100px;">Error loading data.</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="empty-state" style="height:100px;">Error loading data.</td></tr>`;
     }
+}
+
+function applyCustomerFilters() {
+    const query = document.getElementById('customers-search')?.value.toLowerCase().trim() || '';
+    const statusFilter = document.getElementById('customers-status-filter')?.value || 'all';
+
+    filteredCustomers = allCustomers.filter(c => {
+        const matchesQuery = (!query) ||
+            (c.name && c.name.toLowerCase().includes(query)) || 
+            (c.phone && c.phone.toLowerCase().includes(query));
+        if (!matchesQuery) return false;
+
+        if (statusFilter !== 'all') {
+            const custStatus = c.status || 'Open - Not Contacted';
+            if (custStatus !== statusFilter) return false;
+        }
+        return true;
+    });
+
+    currentCustomersPage = 1;
+    renderCustomersTable();
 }
 
 function renderCustomersTable() {
@@ -469,19 +558,35 @@ function renderCustomersTable() {
     tbody.innerHTML = '';
     pageData.forEach(c => {
         const tr = document.createElement('tr');
+        const custStatus = c.status || 'Open - Not Contacted';
+        const statusKey = getStatusKey(custStatus);
+        const safeName = (c.name || 'Customer').replace(/'/g, "\\'");
+        const safePhone = (c.phone || '').replace(/'/g, "\\'");
+        const safeStatus = custStatus.replace(/'/g, "\\'");
+
         tr.innerHTML = `
             <td>
                 <div class="user-cell">
                     <div class="user-avatar">${getInitial(c.name)}</div>
                     <div>
-                        <strong style="color:var(--text-main);display:block;">${c.name}</strong>
+                        <strong style="color:var(--text-main);display:block;">${escapeHtml(c.name)}</strong>
                     </div>
                 </div>
             </td>
             <td><code style="font-size:0.85rem;color:var(--primary);">${c.phone}</code></td>
+            <td>
+                <select class="status-select-badge status-${statusKey}" 
+                        onchange="updateCustomerStatus(${c.id}, this.value, this)" 
+                        title="Click to update status">
+                    <option value="Open - Not Contacted" ${custStatus === 'Open - Not Contacted' ? 'selected' : ''}>🔵 Open - Not Contacted</option>
+                    <option value="Working - Contacted" ${custStatus === 'Working - Contacted' ? 'selected' : ''}>🟡 Working - Contacted</option>
+                    <option value="Closed - Not Converted" ${custStatus === 'Closed - Not Converted' ? 'selected' : ''}>⚪ Closed - Not Converted</option>
+                    <option value="Converted" ${custStatus === 'Converted' ? 'selected' : ''}>🟢 Converted</option>
+                </select>
+            </td>
             <td><span class="window-badge" style="background:var(--primary-light);color:var(--primary);">${c.message_count || 0} messages</span></td>
             <td style="text-align: right;">
-                <button class="btn secondary sm" onclick="editCustomer(${c.id}, '${c.name}', '${c.phone}')">Edit</button>
+                <button class="btn secondary sm" onclick="editCustomer(${c.id}, '${safeName}', '${safePhone}', '${safeStatus}')">Edit</button>
                 <button class="btn danger sm" onclick="deleteCustomer(${c.id})">Delete</button>
             </td>
         `;
@@ -489,7 +594,7 @@ function renderCustomersTable() {
     });
 
     if (totalItems === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="empty-state" style="height: 100px;">No matching customers found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-state" style="height: 100px;">No matching customers found.</td></tr>`;
     }
 
     if (pageInfo) {
@@ -500,15 +605,8 @@ function renderCustomersTable() {
     if (btnNext) btnNext.disabled = currentCustomersPage === totalPages || totalItems === 0;
 }
 
-document.getElementById('customers-search')?.addEventListener('input', (e) => {
-    const query = e.target.value.toLowerCase();
-    filteredCustomers = allCustomers.filter(c => 
-        (c.name && c.name.toLowerCase().includes(query)) || 
-        (c.phone && c.phone.toLowerCase().includes(query))
-    );
-    currentCustomersPage = 1;
-    renderCustomersTable();
-});
+document.getElementById('customers-search')?.addEventListener('input', applyCustomerFilters);
+document.getElementById('customers-status-filter')?.addEventListener('change', applyCustomerFilters);
 
 document.getElementById('btn-prev-page')?.addEventListener('click', () => {
     if (currentCustomersPage > 1) {
@@ -532,10 +630,14 @@ window.deleteCustomer = (id) => {
     });
 };
 
-window.editCustomer = (id, name, phone) => {
+window.editCustomer = (id, name, phone, status) => {
     document.getElementById('cust-id').value = id;
     document.getElementById('cust-name').value = name;
     document.getElementById('cust-phone').value = phone;
+    const statusSelect = document.getElementById('cust-status');
+    if (statusSelect && status) {
+        statusSelect.value = status;
+    }
     document.getElementById('btn-save-cust').innerHTML = `<span>Update Customer</span>`;
     document.getElementById('btn-cancel-edit').style.display = 'inline-flex';
 };
@@ -543,6 +645,8 @@ window.editCustomer = (id, name, phone) => {
 document.getElementById('btn-cancel-edit')?.addEventListener('click', () => {
     document.getElementById('add-customer-form').reset();
     document.getElementById('cust-id').value = '';
+    const statusSelect = document.getElementById('cust-status');
+    if (statusSelect) statusSelect.value = 'Open - Not Contacted';
     document.getElementById('btn-save-cust').innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg><span>Add Customer</span>`;
     document.getElementById('btn-cancel-edit').style.display = 'none';
 });
@@ -552,12 +656,13 @@ document.getElementById('add-customer-form')?.addEventListener('submit', async (
     const custId = document.getElementById('cust-id').value;
     const name = document.getElementById('cust-name').value;
     const phone = formatIndiaPhone(document.getElementById('cust-phone').value);
+    const status = document.getElementById('cust-status')?.value || 'Open - Not Contacted';
     
     const performSave = async () => {
         await fetch('/api/customers', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ name, phone })
+            body: JSON.stringify({ id: custId || undefined, name, phone, status })
         });
         document.getElementById('btn-cancel-edit').click();
         loadCustomers();
@@ -570,7 +675,7 @@ document.getElementById('add-customer-form')?.addEventListener('submit', async (
         // Show Privacy & Consent Opt-in Modal for new customer
         showModal(
             'Customer Opt-In Consent Confirmation',
-            `By adding ${name} (${phone}), you certify that this customer has agreed: "I agree to receive WhatsApp updates, offers and promotional messages from Manaswini Enterprises and Geetha Enterprises".`,
+            `By adding ${name} (${phone}) with status "${status}", you certify that this customer has agreed: "I agree to receive WhatsApp updates, offers and promotional messages from Manaswini Enterprises and Geetha Enterprises".`,
             'confirm',
             performSave,
             'I Confirm & Agree',
@@ -3629,18 +3734,27 @@ function isUnsavedLead(c) {
            (parseInt(c.inbound_count) > 0 && parseInt(c.outbound_count) === 0 && !c.is_saved);
 }
 
+function getCustomerActivityTimestamp(c) {
+    const tMsg = c.last_message_at ? new Date(c.last_message_at).getTime() : 0;
+    const tInbound = c.last_inbound_at ? new Date(c.last_inbound_at).getTime() : 0;
+    const tCreated = c.created_at ? new Date(c.created_at).getTime() : 0;
+    return Math.max(tMsg, tInbound, tCreated);
+}
+
 function filterAndRenderInboxContacts() {
-    const query = document.getElementById('inbox-search')?.value.toLowerCase() || '';
+    const query = document.getElementById('inbox-search')?.value.toLowerCase().trim() || '';
     const now = Date.now();
     const twentyFourHoursMs = 24 * 60 * 60 * 1000;
 
-    const filtered = inboxCustomersList.filter(c => {
-        const matchesQuery = (c.name && c.name.toLowerCase().includes(query)) ||
+    const filtered = (inboxCustomersList || []).filter(c => {
+        const matchesQuery = (!query) ||
+                             (c.name && c.name.toLowerCase().includes(query)) ||
                              (c.phone && c.phone.toLowerCase().includes(query));
         if (!matchesQuery) return false;
 
         const is24hActive = c.last_inbound_at && (now - new Date(c.last_inbound_at).getTime() <= twentyFourHoursMs);
         const isInboundLead = isUnsavedLead(c);
+        const custStatus = c.status || 'Open - Not Contacted';
 
         if (currentInboxFilter === 'free') {
             return is24hActive;
@@ -3648,12 +3762,23 @@ function filterAndRenderInboxContacts() {
             return !is24hActive;
         } else if (currentInboxFilter === 'unsaved') {
             return isInboundLead;
+        } else if (currentInboxFilter === 'status-open') {
+            return custStatus === 'Open - Not Contacted';
+        } else if (currentInboxFilter === 'status-working') {
+            return custStatus === 'Working - Contacted';
+        } else if (currentInboxFilter === 'status-closed') {
+            return custStatus === 'Closed - Not Converted';
+        } else if (currentInboxFilter === 'status-converted') {
+            return custStatus === 'Converted';
         }
         return true;
     });
 
+    // Ensure recently messaged or reply customer is on top as recent conversations
+    filtered.sort((a, b) => getCustomerActivityTimestamp(b) - getCustomerActivityTimestamp(a));
+
     // Check unsaved leads count to show/hide bulk save button
-    const unsavedLeadsCount = inboxCustomersList.filter(c => isUnsavedLead(c)).length;
+    const unsavedLeadsCount = (inboxCustomersList || []).filter(c => isUnsavedLead(c)).length;
 
     const bulkBtn = document.getElementById('btn-bulk-save-unsaved');
     if (bulkBtn) {
@@ -3675,7 +3800,12 @@ function renderInboxContacts(list) {
     sidebar.innerHTML = '';
     if (list.length === 0) {
         const msg = currentInboxFilter === 'free' ? 'No active 24h free tier chats' 
+                  : currentInboxFilter === 'expired' ? 'No 24h expired chats'
                   : currentInboxFilter === 'unsaved' ? 'No new unsaved / ad leads found' 
+                  : currentInboxFilter === 'status-open' ? 'No chats in "Open - Not Contacted"'
+                  : currentInboxFilter === 'status-working' ? 'No chats in "Working - Contacted"'
+                  : currentInboxFilter === 'status-closed' ? 'No chats in "Closed - Not Converted"'
+                  : currentInboxFilter === 'status-converted' ? 'No chats in "Converted"'
                   : 'No contacts found';
         sidebar.innerHTML = `<div class="empty-state">${msg}</div>`;
         return;
@@ -3693,14 +3823,43 @@ function renderInboxContacts(list) {
             ? `<span style="font-size:0.6rem; background:rgba(234, 179, 8, 0.18); color:#eab308; padding:0.1rem 0.35rem; border-radius:4px; margin-left:0.35rem; font-weight:600; display:inline-block;">Ad Lead</span>`
             : '';
 
+        const custStatus = c.status || 'Open - Not Contacted';
+        const statusKey = getStatusKey(custStatus);
+        const statusShort = getStatusShort(custStatus);
+        const statusPillHtml = `<span class="status-pill status-${statusKey}">${statusShort}</span>`;
+
+        let lastMsgHtml = '';
+        if (c.last_message_content || c.last_message_at) {
+            let preview = c.last_message_content || (c.last_message_direction === 'inbound' ? 'Inbound message' : 'Message');
+            if (preview.startsWith('[Template]')) {
+                preview = '📋 ' + preview.replace(/^\[Template\]\s*/i, '');
+            } else if (preview.length > 26) {
+                preview = preview.slice(0, 26) + '...';
+            }
+            const timeStr = formatTime(c.last_message_at || c.last_inbound_at);
+            lastMsgHtml = `
+                <div class="contact-last-msg">
+                    <span class="contact-last-msg-text">${escapeHtml(preview)}</span>
+                    <span class="contact-last-msg-time">${timeStr}</span>
+                </div>
+            `;
+        }
+
         const div = document.createElement('div');
         div.className = `inbox-contact-card ${activeInboxCustomer === c.id ? 'active' : ''}`;
         div.setAttribute('data-id', c.id);
         div.innerHTML = `
             <div class="contact-avatar">${getInitial(c.name)}</div>
             <div class="contact-details">
-                <div class="contact-name" style="display:flex; align-items:center; gap:0.25rem;">${c.name} ${leadTagHtml}</div>
-                <div class="contact-phone">${formatDisplayPhone(c.phone)}</div>
+                <div class="contact-name" style="display:flex; align-items:center; justify-content:space-between; gap:0.25rem;">
+                    <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.name)}</span>
+                    ${leadTagHtml}
+                </div>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:0.4rem; margin-top:0.2rem;">
+                    <div class="contact-phone">${formatDisplayPhone(c.phone)}</div>
+                    ${statusPillHtml}
+                </div>
+                ${lastMsgHtml}
             </div>
             ${unreadBadgeHtml}
         `;
@@ -3927,6 +4086,14 @@ async function openChat(customer, pushHistory = true) {
         }
     }
 
+    // Initialize Status Dropdown in Chat Header
+    const headerStatusSelect = document.getElementById('chat-header-status-select');
+    if (headerStatusSelect) {
+        const custStatus = customer.status || 'Open - Not Contacted';
+        headerStatusSelect.value = custStatus;
+        headerStatusSelect.className = `chat-header-status-select status-${getStatusKey(custStatus)}`;
+    }
+
     document.getElementById('chat-active-customer').value = customer.id;
     document.getElementById('chat-reply-form').style.display = 'flex';
     
@@ -3941,6 +4108,12 @@ async function openChat(customer, pushHistory = true) {
     if(inboxPollInterval) clearInterval(inboxPollInterval);
     inboxPollInterval = setInterval(fetchChatMessages, 4000);
 }
+
+document.getElementById('chat-header-status-select')?.addEventListener('change', async (e) => {
+    if (!activeInboxCustomer) return;
+    const newStatus = e.target.value;
+    await updateCustomerStatus(activeInboxCustomer, newStatus, e.target);
+});
 
 document.getElementById('close-chat-btn')?.addEventListener('click', closeChat);
 
@@ -4203,6 +4376,24 @@ async function fetchChatMessages(isInitial = false) {
         const latestMsg = messages.length > 0 ? messages[messages.length - 1] : null;
         const latestMsgId = latestMsg ? (latestMsg.id || latestMsg.created_at) : null;
 
+        // Keep active customer's latest message activity up to date
+        if (latestMsg && activeCustomerData) {
+            const numId = parseInt(activeCustomerData.id, 10);
+            const inList = (inboxCustomersList || []).find(c => c.id === numId || c.id === activeCustomerData.id);
+            if (inList) {
+                const hadChange = inList.last_message_at !== latestMsg.created_at || inList.last_message_content !== latestMsg.content;
+                inList.last_message_at = latestMsg.created_at;
+                inList.last_message_content = latestMsg.content;
+                inList.last_message_direction = latestMsg.direction;
+                if (latestMsg.direction === 'inbound') {
+                    inList.last_inbound_at = latestMsg.created_at;
+                }
+                if (hadChange) {
+                    filterAndRenderInboxContacts();
+                }
+            }
+        }
+
         // Skip DOM re-render on polling if message count and latest message ID haven't changed
         if (!isInitial && messages.length === lastChatMsgCount && latestMsgId === lastChatLatestMsgId) {
             return;
@@ -4345,6 +4536,15 @@ document.getElementById('chat-reply-form')?.addEventListener('submit', async (e)
     const result = await res.json();
     if (result.error) {
         showModal('Message Error', "Failed to send message: " + result.error);
+    } else {
+        const numId = parseInt(customerId, 10);
+        const cust = (inboxCustomersList || []).find(c => c.id === numId || c.id === customerId);
+        if (cust) {
+            cust.last_message_at = new Date().toISOString();
+            cust.last_message_content = content;
+            cust.last_message_direction = 'outbound';
+            filterAndRenderInboxContacts();
+        }
     }
     
     fetchChatMessages();
@@ -4470,6 +4670,14 @@ document.getElementById('btn-inbox-send-template')?.addEventListener('click', as
             if (result.error) {
                 showModal('Template Send Error', result.error);
             } else {
+                const numId = parseInt(activeInboxCustomer, 10);
+                const cust = (inboxCustomersList || []).find(c => c.id === numId || c.id === activeInboxCustomer);
+                if (cust) {
+                    cust.last_message_at = new Date().toISOString();
+                    cust.last_message_content = `[Template] ${templateName}`;
+                    cust.last_message_direction = 'outbound';
+                    filterAndRenderInboxContacts();
+                }
                 fetchChatMessages();
             }
         }, 'Send Template', 'btn primary');

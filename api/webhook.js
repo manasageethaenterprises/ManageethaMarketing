@@ -112,7 +112,7 @@ module.exports = async (req, res) => {
                 let customerId;
 
                 if (customer.length === 0) {
-                  const newCust = await sql`INSERT INTO customers (name, phone, is_saved) VALUES (${name}, ${phone}, false) RETURNING id`;
+                  const newCust = await sql`INSERT INTO customers (name, phone, is_saved, status) VALUES (${name}, ${phone}, false, 'Open - Not Contacted') RETURNING id`;
                   customerId = newCust[0].id;
                 } else {
                   customerId = customer[0].id;
