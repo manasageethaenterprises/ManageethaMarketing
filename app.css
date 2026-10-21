@@ -1590,12 +1590,15 @@ tr:hover td {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.65);
-    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    padding: 1rem;
+    box-sizing: border-box;
 }
 
 .modal-overlay.hidden {
@@ -1613,11 +1616,119 @@ tr:hover td {
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
 }
 
+/* Enhanced Global Alert/Confirm Dialog */
+.modal-content.modal-app-dialog {
+    width: 100%;
+    max-width: 460px;
+    padding: 2.2rem 2.25rem 1.85rem;
+    text-align: center;
+    border-radius: 18px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    animation: modalPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes modalPopIn {
+    0% {
+        opacity: 0;
+        transform: translateY(16px) scale(0.96);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.modal-icon-badge {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1.1rem;
+    background: rgba(0, 168, 132, 0.12);
+    color: var(--primary, #00a884);
+    border: 1.5px solid rgba(0, 168, 132, 0.3);
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.modal-icon-badge.icon-danger {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.modal-icon-badge.icon-warning {
+    background: rgba(245, 158, 11, 0.14);
+    color: #f59e0b;
+    border-color: rgba(245, 158, 11, 0.35);
+}
+
+.modal-icon-badge svg {
+    width: 26px;
+    height: 26px;
+}
+
+.modal-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-main);
+    margin-bottom: 0.65rem;
+    letter-spacing: -0.015em;
+    line-height: 1.3;
+}
+
+.modal-message {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin-bottom: 1.5rem;
+    width: 100%;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+.modal-message strong {
+    color: var(--primary, #00a884);
+    font-weight: 600;
+    background: rgba(0, 168, 132, 0.08);
+    border: 1px solid rgba(0, 168, 132, 0.25);
+    padding: 0.3rem 0.65rem;
+    border-radius: 6px;
+    display: inline-block;
+    margin: 0.35rem 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.825rem;
+    word-break: break-all;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
 .modal-actions {
     display: flex;
     justify-content: center;
     gap: 0.75rem;
     margin-top: 1.5rem;
+    width: 100%;
+}
+
+.modal-content.modal-app-dialog .modal-actions {
+    margin-top: 0;
+}
+
+.modal-content.modal-app-dialog .modal-actions .btn {
+    min-width: 120px;
+    justify-content: center;
+    padding: 0.65rem 1.4rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-radius: 8px;
 }
 
 /* Chat Back Button */
@@ -3200,4 +3311,307 @@ tr:hover td {
     opacity: 0.8;
     white-space: nowrap;
     flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Customers Screen Responsive System & Form Layout
+   ========================================================================== */
+
+/* Page Header & Actions Responsiveness */
+#view-customers .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+}
+
+#view-customers .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+#view-customers .header-actions .btn {
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+/* Customer Add/Edit Form Card */
+.customer-add-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    padding: 1.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.customer-form-row {
+    display: grid;
+    grid-template-columns: 2fr 2fr 1.6fr auto;
+    gap: 0.75rem;
+    align-items: center;
+    width: 100%;
+}
+
+.customer-form-row .input-with-icon {
+    width: 100%;
+    min-width: 0;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.customer-form-row .input-with-icon input {
+    height: 42px;
+    width: 100%;
+    border-radius: 8px;
+    padding-left: 2.75rem !important;
+}
+
+.customer-form-row .form-status-wrapper {
+    width: 100%;
+    min-width: 0;
+}
+
+.customer-form-row .status-dropdown-input {
+    height: 42px;
+    width: 100%;
+    border-radius: 8px;
+}
+
+.customer-form-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.customer-form-actions .btn {
+    height: 42px;
+    white-space: nowrap;
+    padding: 0 1.2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    font-weight: 600;
+}
+
+.customer-consent-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    background: var(--bg-dark);
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    transition: background 0.2s, border-color 0.2s;
+    line-height: 1.45;
+}
+
+.customer-consent-card:hover {
+    border-color: rgba(0, 168, 132, 0.35);
+}
+
+.consent-checkbox {
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+    flex-shrink: 0;
+    accent-color: var(--primary, #00a884);
+    cursor: pointer;
+}
+
+/* Customers Toolbar & Filter Controls */
+.customers-toolbar-card {
+    padding: 0.85rem 1.25rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.85rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+}
+
+.customers-toolbar-card .search-box {
+    flex: 1;
+    min-width: 220px;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.customers-toolbar-card .search-box input {
+    height: 38px;
+    padding-left: 2.5rem;
+}
+
+.customers-toolbar-card .search-box svg {
+    position: absolute;
+    left: 10px;
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted);
+}
+
+.table-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.table-filter-group .filter-label {
+    font-size: 0.775rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.table-filter-group .table-filter-select {
+    height: 36px;
+    padding: 0 0.85rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    background: var(--bg-card);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    outline: none;
+}
+
+.toolbar-action-btn {
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0 0.85rem;
+    border-radius: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.toolbar-action-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+/* Responsive Breakpoints for Customers Section */
+@media (max-width: 1080px) {
+    #view-customers .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.85rem;
+    }
+
+    #view-customers .header-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.5rem;
+    }
+
+    #view-customers .header-actions .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .customer-form-row {
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+    }
+
+    .customer-form-actions {
+        grid-column: span 1;
+    }
+
+    .customer-form-actions .btn {
+        width: 100%;
+    }
+}
+
+@media (max-width: 900px) {
+    .customers-toolbar-card {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.75rem;
+    }
+
+    .customers-toolbar-card .search-box {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .customers-toolbar-card .table-filter-group {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .customers-toolbar-card .pagination-area {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
+
+@media (max-width: 640px) {
+    .customer-form-row {
+        grid-template-columns: 1fr;
+        gap: 0.65rem;
+    }
+
+    .customer-form-actions {
+        grid-column: span 1;
+        width: 100%;
+        flex-direction: column;
+    }
+
+    .customer-form-actions .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .customers-toolbar-card .table-filter-group {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+    }
+
+    .customers-toolbar-card .table-filter-group .filter-label {
+        grid-column: span 2;
+    }
+
+    .customers-toolbar-card .table-filter-group .table-filter-select {
+        grid-column: span 2;
+        width: 100%;
+    }
+
+    .customers-toolbar-card .toolbar-action-btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    #view-customers .header-actions {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 440px) {
+    #view-customers .header-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .customer-consent-card {
+        font-size: 0.75rem;
+        padding: 0.65rem 0.75rem;
+    }
 }
