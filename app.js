@@ -535,13 +535,14 @@ function applyCustomerFilters() {
     currentCustomersPage = 1;
     renderCustomersTable();
 
-    // Dynamically update Export button label with filtered count
+    // Dynamically update Export button labels with filtered count
     const exportLabel = document.getElementById('btn-export-customers-label');
     if (exportLabel) {
-        const isFiltered = (statusFilter !== 'all') || Boolean(query);
-        exportLabel.textContent = isFiltered 
-            ? `Export Filtered (${filteredCustomers.length})` 
-            : `Export All (${filteredCustomers.length})`;
+        exportLabel.textContent = `Export Excel (${filteredCustomers.length})`;
+    }
+    const exportPdfLabel = document.getElementById('btn-export-pdf-label');
+    if (exportPdfLabel) {
+        exportPdfLabel.textContent = `Export PDF (${filteredCustomers.length})`;
     }
 }
 
@@ -918,6 +919,198 @@ function exportFilteredCustomers() {
 
 document.getElementById('btn-export-customers')?.addEventListener('click', exportFilteredCustomers);
 document.getElementById('btn-export-customers-toolbar')?.addEventListener('click', exportFilteredCustomers);
+
+// --- Export Filtered Customers to PDF Document ---
+async function exportFilteredCustomersPdf() {
+    if (!filteredCustomers || filteredCustomers.length === 0) {
+        showModal('No Customers to Export', 'There are no customers matching your current filter criteria to export.');
+        return;
+    }
+
+    // Defensive check if jsPDF is loaded, or load dynamically
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+        showModal('Loading PDF Generator', 'Downloading PDF generator library, please wait a moment...');
+        try {
+            await new Promise((resolve, reject) => {
+                const s1 = document.createElement('script');
+                s1.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+                s1.onload = () => {
+                    const s2 = document.createElement('script');
+                    s2.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+                    s2.onload = resolve;
+                    s2.onerror = reject;
+                    document.head.appendChild(s2);
+                };
+                s1.onerror = reject;
+                document.head.appendChild(s1);
+            });
+        } catch (err) {
+            showModal('PDF Error', 'Failed to load PDF library. Please check your internet connection.');
+            return;
+        }
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'pt',
+        format: 'a4'
+    });
+
+    const statusFilter = document.getElementById('customers-status-filter')?.value || 'all';
+    const searchQuery = document.getElementById('customers-search')?.value.trim() || '';
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // 1. Top Branded Header
+    doc.setFillColor(0, 168, 132); // Manageetha WhatsApp emerald
+    doc.rect(0, 0, pageWidth, 55, 'F');
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.text('MANAGEETHA - CUSTOMERS DIRECTORY', 30, 32);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.text('WhatsApp Business Marketing Platform', 30, 46);
+
+    const nowFormatted = new Date().toLocaleString('en-US', {
+        dateStyle: 'medium',
+        timeStyle: 'short'
+    });
+
+    doc.setFontSize(8);
+    doc.text(`Generated: ${nowFormatted}`, pageWidth - 30, 38, { align: 'right' });
+
+    // 2. Filter Summary Banner
+    doc.setFillColor(245, 247, 248);
+    doc.roundedRect(30, 68, pageWidth - 60, 36, 4, 4, 'F');
+    doc.setDrawColor(218, 222, 226);
+    doc.roundedRect(30, 68, pageWidth - 60, 36, 4, 4, 'S');
+
+    doc.setTextColor(40, 50, 60);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+
+    const filterText = statusFilter !== 'all' ? statusFilter : 'All Statuses';
+    doc.text('Filter Status:', 42, 84);
+    doc.setFont('helvetica', 'normal');
+    doc.text(filterText, 100, 84);
+
+    if (searchQuery) {
+        doc.setFont('helvetica', 'bold');
+        doc.text('Search Query:', 220, 84);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`"${searchQuery}"`, 285, 84);
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Total Records:', pageWidth - 125, 84);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 168, 132);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${filteredCustomers.length} contact(s)`, pageWidth - 42, 84, { align: 'right' });
+
+    // 3. Table Rows
+    const tableData = filteredCustomers.map((c, index) => {
+        const phoneFormatted = formatDisplayPhone(c.phone);
+        const createdDate = c.created_at ? new Date(c.created_at).toLocaleDateString() : '-';
+        const msgCount = `${c.message_count || 0} msgs`;
+        const custStatus = c.status || 'Open - Not Contacted';
+
+        return [
+            index + 1,
+            c.name || 'Customer',
+            phoneFormatted,
+            custStatus,
+            msgCount,
+            createdDate
+        ];
+    });
+
+    // AutoTable Generation
+    doc.autoTable({
+        startY: 116,
+        head: [['#', 'Customer Name', 'Phone Number', 'Status', 'Messages', 'Date Added']],
+        body: tableData,
+        theme: 'striped',
+        margin: { left: 30, right: 30, bottom: 42 },
+        styles: {
+            fontSize: 8,
+            cellPadding: 4.5,
+            font: 'helvetica',
+            textColor: [33, 37, 41],
+            lineColor: [228, 232, 235],
+            lineWidth: 0.5
+        },
+        headStyles: {
+            fillColor: [0, 92, 75],
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            fontSize: 8.5,
+            halign: 'left'
+        },
+        alternateRowStyles: {
+            fillColor: [248, 250, 251]
+        },
+        columnStyles: {
+            0: { cellWidth: 26, halign: 'center' },
+            1: { cellWidth: 145, fontStyle: 'bold' },
+            2: { cellWidth: 105 },
+            3: { cellWidth: 125, fontStyle: 'bold' },
+            4: { cellWidth: 65, halign: 'center' },
+            5: { cellWidth: 65, halign: 'center' }
+        },
+        didParseCell: function(data) {
+            if (data.section === 'body' && data.column.index === 3) {
+                const text = String(data.cell.raw || '');
+                if (text.includes('Open')) {
+                    data.cell.styles.textColor = [37, 99, 235]; // Blue
+                } else if (text.includes('Working')) {
+                    data.cell.styles.textColor = [217, 119, 6]; // Amber
+                } else if (text.includes('Closed')) {
+                    data.cell.styles.textColor = [100, 116, 139]; // Slate
+                } else if (text.includes('Converted')) {
+                    data.cell.styles.textColor = [5, 150, 105]; // Emerald
+                }
+            }
+        },
+        didDrawPage: function(data) {
+            // Branded Footer on every page
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(7.5);
+            doc.setTextColor(130, 140, 150);
+
+            doc.setDrawColor(220, 224, 228);
+            doc.setLineWidth(0.5);
+            doc.line(30, pageHeight - 26, pageWidth - 30, pageHeight - 26);
+
+            doc.text('Powering WhatsApp Business for Manaswini & Geetha Enterprises', 30, pageHeight - 14);
+            const pageStr = `Page ${data.pageNumber}`;
+            doc.text(pageStr, pageWidth - 30, pageHeight - 14, { align: 'right' });
+        }
+    });
+
+    // Descriptive filename
+    const nowStr = new Date().toISOString().slice(0, 10);
+    let filterSlug = 'all';
+    if (statusFilter !== 'all') {
+        filterSlug = statusFilter.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    } else if (searchQuery) {
+        filterSlug = 'search_' + searchQuery.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 15);
+    }
+    const filename = `Manageetha_Customers_${filterSlug}_${tableData.length}_contacts_${nowStr}.pdf`;
+
+    doc.save(filename);
+
+    const filterDesc = statusFilter !== 'all' ? `status "${statusFilter}"` : (searchQuery ? `search "${searchQuery}"` : 'all contacts');
+    showModal('PDF Export Successful', `Successfully generated PDF report with ${tableData.length} customer(s) based on ${filterDesc} to <strong>${filename}</strong>.`);
+}
+
+document.getElementById('btn-export-pdf')?.addEventListener('click', exportFilteredCustomersPdf);
+document.getElementById('btn-export-pdf-toolbar')?.addEventListener('click', exportFilteredCustomersPdf);
 
 
 
