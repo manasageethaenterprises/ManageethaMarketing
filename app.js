@@ -4585,13 +4585,16 @@ async function openChat(customer, pushHistory = true) {
         }
     }
 
-    // Initialize Status Dropdown in Chat Header
+    // Initialize Status Dropdown & Notes in Chat Header
     const headerStatusSelect = document.getElementById('chat-header-status-select');
     if (headerStatusSelect) {
         const custStatus = customer.status || 'Open - Not Contacted';
         headerStatusSelect.value = custStatus;
         headerStatusSelect.className = `chat-header-status-select status-${getStatusKey(custStatus)}`;
     }
+
+    // Sync conversation notes strip
+    syncChatNotesUI(customer);
 
     document.getElementById('chat-active-customer').value = customer.id;
     document.getElementById('chat-reply-form').style.display = 'flex';
@@ -4623,6 +4626,9 @@ function closeChat() {
     
     const headerBar = document.getElementById('chat-header-bar');
     if (headerBar) headerBar.style.display = 'none';
+
+    const strip = document.getElementById('chat-note-strip');
+    if (strip) strip.style.display = 'none';
 
     document.getElementById('chat-reply-form').style.display = 'none';
     document.getElementById('chat-messages').innerHTML = `
