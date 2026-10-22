@@ -2002,6 +2002,7 @@ function renderStep2Form(category, subtype) {
                         <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="var(--primary)" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                         <div style="font-size:0.85rem; color:var(--text-main); font-weight:600; margin-top:0.4rem;">Drag and drop to upload</div>
                         <div style="font-size:0.75rem; color:var(--primary); font-weight:500;">Or choose files on your device</div>
+                        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.25rem;">Video: Max 16MB (MP4) • Image: Max 5MB • Doc: Max 100MB (PDF)</div>
                         <input type="file" id="tpl-media-file-input" style="display:none;" accept="image/*,video/*,.pdf,.doc,.docx">
                     </div>
 
@@ -3840,6 +3841,7 @@ const getBase64 = (file) => new Promise((resolve, reject) => {
 });
 
 // Obtain Meta Resumable Upload handle (header_handle) for Template Header sample media
+// Streams file in 2MB chunks via server proxy to Meta Resumable Upload API (bypasses browser CORS & Vercel limits)
 async function getMetaHeaderHandle(file, onProgress) {
     if (!file) return null;
     if (currentMediaSampleHandle) {
@@ -3850,122 +3852,75 @@ async function getMetaHeaderHandle(file, onProgress) {
 
     // 1. Proactive file size validation against Meta limits
     if (mimeType.startsWith('video/') && file.size > 16 * 1024 * 1024) {
-        throw new Error(`Video file size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds Meta's 16MB limit. Please select a smaller video under 16MB.`);
+        throw new Error(`Video file size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds Meta's 16MB limit. Please select a video under 16MB.`);
     }
     if (mimeType.startsWith('image/') && file.size > 5 * 1024 * 1024) {
         throw new Error(`Image file size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds Meta's 5MB limit. Please select an image under 5MB.`);
     }
-
-    // 2. Fetch config for direct Meta Cloud API streaming (bypasses server payload limits entirely)
-    let config = null;
-    try {
-        const cfgRes = await fetch('/api/config');
-        if (cfgRes.ok) config = await cfgRes.json();
-    } catch (e) {
-        console.warn('Could not retrieve config for direct Meta upload:', e);
+    if (file.size > 100 * 1024 * 1024) {
+        throw new Error(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds Meta's 100MB limit.`);
     }
 
-    // 3. Primary Method: Direct Meta Resumable Upload Session API
-    if (config && config.meta_token) {
-        try {
-            const sessionUrl = `https://graph.facebook.com/v19.0/app/uploads?file_length=${file.size}&file_type=${encodeURIComponent(mimeType)}&access_token=${config.meta_token}`;
-            const sessionRes = await fetch(sessionUrl, { method: 'POST' });
-            const sessionData = await sessionRes.json();
-
-            if (sessionData && sessionData.id) {
-                const handle = await new Promise((resolve, reject) => {
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('POST', `https://graph.facebook.com/v19.0/${sessionData.id}`);
-                    xhr.setRequestHeader('Authorization', `OAuth ${config.meta_token}`);
-                    xhr.setRequestHeader('file_offset', '0');
-                    xhr.setRequestHeader('Content-Type', mimeType);
-
-                    if (xhr.upload && onProgress) {
-                        xhr.upload.onprogress = (e) => {
-                            if (e.lengthComputable) {
-                                const percent = Math.round((e.loaded / e.total) * 100);
-                                onProgress(percent);
-                            }
-                        };
-                    }
-
-                    xhr.onload = () => {
-                        if (xhr.status >= 200 && xhr.status < 300) {
-                            try {
-                                const res = JSON.parse(xhr.responseText);
-                                if (res.h) resolve(res.h);
-                                else reject(new Error('Meta session returned no handle "h"'));
-                            } catch (e) { reject(e); }
-                        } else {
-                            try {
-                                const errData = JSON.parse(xhr.responseText);
-                                reject(new Error(errData?.error?.message || `Meta upload failed with status ${xhr.status}`));
-                            } catch (e) {
-                                reject(new Error(`Meta upload failed with status ${xhr.status}`));
-                            }
-                        }
-                    };
-
-                    xhr.onerror = () => reject(new Error('Network error uploading sample media directly to Meta.'));
-                    xhr.send(file);
-                });
-
-                if (handle) {
-                    currentMediaSampleHandle = handle;
-                    return handle;
-                }
-            }
-        } catch (directErr) {
-            console.warn('Direct Meta Resumable Upload session failed, checking fallback:', directErr);
-        }
-
-        // Method 3b: Direct WhatsApp Media API upload to /{phone_id}/media
-        if (config.meta_phone_id) {
-            try {
-                const metaFastRes = await uploadMediaToMetaFast(file, config, onProgress);
-                if (metaFastRes && metaFastRes.id) {
-                    currentMediaSampleHandle = metaFastRes.id;
-                    return metaFastRes.id;
-                }
-            } catch (fastErr) {
-                console.warn('Direct media upload to phone failed, falling back to server API:', fastErr);
-            }
-        }
-    }
-
-    // 4. Server-Side Fallback via /api/upload-media (with robust error handling for payload limits)
-    const base64Data = await getBase64(file);
-    const res = await fetch('/api/upload-media', {
+    // 2. Step 1: Initialize Resumable Upload Session via server
+    if (onProgress) onProgress(5);
+    const initRes = await fetch(`/api/upload-media?action=init_session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            base64Data: base64Data,
-            fileName: file.name,
-            mimeType: mimeType
+            fileLength: file.size,
+            mimeType: mimeType,
+            fileName: file.name
         })
     });
 
-    const rawText = await res.text();
-    let data = null;
-    try {
-        data = JSON.parse(rawText);
-    } catch (parseErr) {
-        if (res.status === 413 || rawText.includes('Request Entity Too Large') || rawText.includes('FUNCTION_PAYLOAD_TOO_LARGE')) {
-            throw new Error(`File is too large for server upload (${(file.size / (1024 * 1024)).toFixed(1)}MB). Please choose a smaller file under 3MB.`);
+    const initData = await initRes.json();
+    if (!initRes.ok || initData.error || !initData.sessionId) {
+        throw new Error(initData?.error || 'Failed to initialize Meta sample upload session.');
+    }
+
+    const sessionId = initData.sessionId;
+    const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB chunks (safely below Vercel's 4.5 MB payload limit)
+    let offset = 0;
+    let finalHandle = null;
+
+    // 3. Step 2: Upload file in 2MB chunks sequentially to avoid Vercel 4.5MB limit
+    while (offset < file.size) {
+        const chunkEnd = Math.min(offset + CHUNK_SIZE, file.size);
+        const chunkBlob = file.slice(offset, chunkEnd);
+
+        if (onProgress) {
+            const percent = Math.round((offset / file.size) * 90) + 5;
+            onProgress(percent);
         }
-        throw new Error(`Upload error (${res.status}): ${rawText.slice(0, 150)}`);
+
+        const chunkUrl = `/api/upload-media?action=upload_chunk&session_id=${encodeURIComponent(sessionId)}&file_offset=${offset}&mime_type=${encodeURIComponent(mimeType)}`;
+        const chunkRes = await fetch(chunkUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: chunkBlob
+        });
+
+        const chunkData = await chunkRes.json();
+        if (!chunkRes.ok || chunkData.error) {
+            throw new Error(chunkData?.error || `Chunk upload failed at offset ${offset}`);
+        }
+
+        if (chunkData.handle) {
+            finalHandle = chunkData.handle;
+            break;
+        }
+
+        offset = chunkEnd;
     }
 
-    if (data.error) {
-        throw new Error(data.error);
+    if (onProgress) onProgress(100);
+
+    if (finalHandle) {
+        currentMediaSampleHandle = finalHandle;
+        return finalHandle;
     }
 
-    if (data.handle) {
-        currentMediaSampleHandle = data.handle;
-        return data.handle;
-    }
-
-    throw new Error('Server did not return a valid Meta media handle.');
+    throw new Error('Meta did not return a valid media handle after chunk upload.');
 }
 
 // Fast Binary Streaming Upload to Meta Cloud API with Live Progress
