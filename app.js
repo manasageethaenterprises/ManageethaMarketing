@@ -2272,6 +2272,7 @@ window.removeTemplateButton = removeTemplateButton;
 // Global Media & Variable State
 let currentMediaSampleFile = null;
 let currentMediaSampleUrl = null;
+let currentMediaSampleHandle = null;
 
 function attachStep2FormListeners() {
     const nameInput = document.getElementById('tpl-name');
@@ -2344,7 +2345,22 @@ function attachStep2FormListeners() {
     });
 
     function handleMediaFileSelected(file) {
+        if (!file) return;
+
+        // Proactive client-side size check against Meta WhatsApp limits
+        if (file.type.startsWith('video/') && file.size > 16 * 1024 * 1024) {
+            showModal('File Size Exceeds Meta Limit', `The selected video is ${(file.size / (1024 * 1024)).toFixed(1)}MB. Meta's WhatsApp API supports videos up to 16MB. Please select a video under 16MB.`);
+            removeMediaFile();
+            return;
+        }
+        if (file.type.startsWith('image/') && file.size > 5 * 1024 * 1024) {
+            showModal('File Size Exceeds Meta Limit', `The selected image is ${(file.size / (1024 * 1024)).toFixed(1)}MB. Meta's WhatsApp API supports images up to 5MB. Please select an image under 5MB.`);
+            removeMediaFile();
+            return;
+        }
+
         currentMediaSampleFile = file;
+        currentMediaSampleHandle = null;
         currentMediaSampleUrl = URL.createObjectURL(file);
         
         const mediaThumbEl = document.getElementById('tpl-media-file-thumb');
@@ -2381,6 +2397,7 @@ function attachStep2FormListeners() {
 
     function removeMediaFile() {
         currentMediaSampleFile = null;
+        currentMediaSampleHandle = null;
         if (currentMediaSampleUrl) {
             URL.revokeObjectURL(currentMediaSampleUrl);
             currentMediaSampleUrl = null;
@@ -2846,6 +2863,7 @@ function resetTemplateModal() {
     currentSelectedCategory = 'MARKETING';
     currentSelectedSubtype = 'default';
     currentMediaSampleFile = null;
+    currentMediaSampleHandle = null;
     if (currentMediaSampleUrl) {
         URL.revokeObjectURL(currentMediaSampleUrl);
         currentMediaSampleUrl = null;
@@ -2867,6 +2885,8 @@ function resetTemplateModal() {
     const submitBtn = document.getElementById('btn-submit-tpl');
     if (submitBtn) {
         submitBtn.disabled = false;
+        submitBtn.style.opacity = '1';
+        submitBtn.style.pointerEvents = 'auto';
         submitBtn.innerHTML = 'Submit Template to Meta';
     }
 
@@ -3052,6 +3072,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        const submitBtn = document.getElementById('btn-submit-tpl');
+        const origBtnText = submitBtn ? (submitBtn.dataset.origText || submitBtn.innerHTML) : 'Submit Template to Meta';
+        if (submitBtn) submitBtn.dataset.origText = origBtnText;
+
+        const setBtnState = (html, disabled = true) => {
+            if (!submitBtn) return;
+            submitBtn.disabled = disabled;
+            submitBtn.style.opacity = disabled ? '0.7' : '1';
+            submitBtn.style.pointerEvents = disabled ? 'none' : 'auto';
+            submitBtn.innerHTML = html;
+        };
+
+        const resetBtnState = () => {
+            if (!submitBtn) return;
+            submitBtn.disabled = false;
+            submitBtn.style.opacity = '1';
+            submitBtn.style.pointerEvents = 'auto';
+            submitBtn.innerHTML = submitBtn.dataset.origText || origBtnText;
+        };
+
         // Construct Meta Components Array
         const components = [];
 
@@ -3076,17 +3116,32 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             components.push(headerComp);
         } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-            let handle = null;
+            let handle = currentMediaSampleHandle || null;
 
-            if (currentMediaSampleFile) {
+            if (currentMediaSampleFile && !handle) {
+                if (headerType === 'VIDEO' && currentMediaSampleFile.size > 16 * 1024 * 1024) {
+                    showModal('File Size Exceeds Meta Limit', `Selected video is ${(currentMediaSampleFile.size / (1024 * 1024)).toFixed(1)}MB. Meta's WhatsApp API limits sample video to 16MB. Please select a smaller video.`);
+                    return;
+                }
+                if (headerType === 'IMAGE' && currentMediaSampleFile.size > 5 * 1024 * 1024) {
+                    showModal('File Size Exceeds Meta Limit', `Selected image is ${(currentMediaSampleFile.size / (1024 * 1024)).toFixed(1)}MB. Meta's WhatsApp API limits header image to 5MB. Please select a smaller image.`);
+                    return;
+                }
+
+                // Show button loading as "Uploading media to Meta..."
+                setBtnState('<span class="spinner"></span> Uploading media to Meta...');
+
                 try {
-                    handle = await getMetaHeaderHandle(currentMediaSampleFile);
+                    handle = await getMetaHeaderHandle(currentMediaSampleFile, (percent) => {
+                        setBtnState(`<span class="spinner"></span> Uploading media to Meta (${percent}%)...`);
+                    });
                 } catch (err) {
                     console.error('Sample media upload error:', err);
+                    resetBtnState();
                     showModal('Sample Media Upload Error', `Failed to upload sample ${headerType.toLowerCase()} to Meta: ${err.message}. Please select the file again.`);
                     return;
                 }
-            } else if (editingTemplateId && typeof templatesCache !== 'undefined') {
+            } else if (!handle && editingTemplateId && typeof templatesCache !== 'undefined') {
                 const tpl = templatesCache.find(t => String(t.id || t.name) === String(editingTemplateId));
                 const oldHeader = tpl?.components?.find(c => c.type === 'HEADER');
                 if (oldHeader?.example?.header_handle?.[0]) {
@@ -3095,6 +3150,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (!handle) {
+                resetBtnState();
                 showModal('Sample File Required', `Meta requires a sample ${headerType.toLowerCase()} file for template verification. Please drag & drop or select a sample ${headerType.toLowerCase()} file in the "Upload sample media file" box.`);
                 return;
             }
@@ -3225,15 +3281,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        const submitBtn = document.getElementById('btn-submit-tpl');
-        const origBtnText = submitBtn ? (submitBtn.dataset.origText || submitBtn.innerHTML) : 'Submit Template to Meta';
-        if (submitBtn) {
-            submitBtn.dataset.origText = origBtnText;
-            submitBtn.disabled = true;
-            submitBtn.style.opacity = '0.6';
-            submitBtn.style.pointerEvents = 'none';
-            submitBtn.innerHTML = '<span class="spinner"></span> Submitting to Meta...';
-        }
+        setBtnState('<span class="spinner"></span> Submitting template to Meta...');
 
         try {
             const isEdit = !!editingTemplateId;
@@ -3261,34 +3309,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
 
             if (data.error) {
-                if (submitBtn) {
-                    submitBtn.disabled = false;
-                    submitBtn.style.opacity = '1';
-                    submitBtn.style.pointerEvents = 'auto';
-                    submitBtn.innerHTML = origBtnText;
-                }
+                resetBtnState();
                 showModal('Meta Submission Error', data.error);
             } else {
                 closeTemplateModal();
                 editingTemplateId = null;
                 const nameInput = document.getElementById('tpl-name');
                 if (nameInput) nameInput.disabled = false;
-                if (submitBtn) {
-                    submitBtn.disabled = false;
-                    submitBtn.style.opacity = '1';
-                    submitBtn.style.pointerEvents = 'auto';
-                    submitBtn.innerHTML = origBtnText;
-                }
+                resetBtnState();
                 showModal('Success!', isEdit ? `Template "${name}" updated in Meta Cloud API successfully!` : `Template "${name}" created and submitted to Meta for review successfully! Status: ${data.template?.status || 'PENDING'}`);
                 loadTemplates();
             }
         } catch (err) {
-            if (submitBtn) {
-                submitBtn.disabled = false;
-                submitBtn.style.opacity = '1';
-                submitBtn.style.pointerEvents = 'auto';
-                submitBtn.innerHTML = origBtnText;
-            }
+            resetBtnState();
             showModal('Error', 'Failed to connect to template API: ' + err.message);
         }
     });
@@ -3806,12 +3839,102 @@ const getBase64 = (file) => new Promise((resolve, reject) => {
     reader.onerror = error => reject(error);
 });
 
-// Obtain Meta Resumable Upload handle (header_handle) for Template Header sample media via server API
-async function getMetaHeaderHandle(file) {
+// Obtain Meta Resumable Upload handle (header_handle) for Template Header sample media
+async function getMetaHeaderHandle(file, onProgress) {
     if (!file) return null;
-    const base64Data = await getBase64(file);
+    if (currentMediaSampleHandle) {
+        return currentMediaSampleHandle;
+    }
+
     const mimeType = file.type || (file.name && file.name.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg');
 
+    // 1. Proactive file size validation against Meta limits
+    if (mimeType.startsWith('video/') && file.size > 16 * 1024 * 1024) {
+        throw new Error(`Video file size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds Meta's 16MB limit. Please select a smaller video under 16MB.`);
+    }
+    if (mimeType.startsWith('image/') && file.size > 5 * 1024 * 1024) {
+        throw new Error(`Image file size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds Meta's 5MB limit. Please select an image under 5MB.`);
+    }
+
+    // 2. Fetch config for direct Meta Cloud API streaming (bypasses server payload limits entirely)
+    let config = null;
+    try {
+        const cfgRes = await fetch('/api/config');
+        if (cfgRes.ok) config = await cfgRes.json();
+    } catch (e) {
+        console.warn('Could not retrieve config for direct Meta upload:', e);
+    }
+
+    // 3. Primary Method: Direct Meta Resumable Upload Session API
+    if (config && config.meta_token) {
+        try {
+            const sessionUrl = `https://graph.facebook.com/v19.0/app/uploads?file_length=${file.size}&file_type=${encodeURIComponent(mimeType)}&access_token=${config.meta_token}`;
+            const sessionRes = await fetch(sessionUrl, { method: 'POST' });
+            const sessionData = await sessionRes.json();
+
+            if (sessionData && sessionData.id) {
+                const handle = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', `https://graph.facebook.com/v19.0/${sessionData.id}`);
+                    xhr.setRequestHeader('Authorization', `OAuth ${config.meta_token}`);
+                    xhr.setRequestHeader('file_offset', '0');
+                    xhr.setRequestHeader('Content-Type', mimeType);
+
+                    if (xhr.upload && onProgress) {
+                        xhr.upload.onprogress = (e) => {
+                            if (e.lengthComputable) {
+                                const percent = Math.round((e.loaded / e.total) * 100);
+                                onProgress(percent);
+                            }
+                        };
+                    }
+
+                    xhr.onload = () => {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            try {
+                                const res = JSON.parse(xhr.responseText);
+                                if (res.h) resolve(res.h);
+                                else reject(new Error('Meta session returned no handle "h"'));
+                            } catch (e) { reject(e); }
+                        } else {
+                            try {
+                                const errData = JSON.parse(xhr.responseText);
+                                reject(new Error(errData?.error?.message || `Meta upload failed with status ${xhr.status}`));
+                            } catch (e) {
+                                reject(new Error(`Meta upload failed with status ${xhr.status}`));
+                            }
+                        }
+                    };
+
+                    xhr.onerror = () => reject(new Error('Network error uploading sample media directly to Meta.'));
+                    xhr.send(file);
+                });
+
+                if (handle) {
+                    currentMediaSampleHandle = handle;
+                    return handle;
+                }
+            }
+        } catch (directErr) {
+            console.warn('Direct Meta Resumable Upload session failed, checking fallback:', directErr);
+        }
+
+        // Method 3b: Direct WhatsApp Media API upload to /{phone_id}/media
+        if (config.meta_phone_id) {
+            try {
+                const metaFastRes = await uploadMediaToMetaFast(file, config, onProgress);
+                if (metaFastRes && metaFastRes.id) {
+                    currentMediaSampleHandle = metaFastRes.id;
+                    return metaFastRes.id;
+                }
+            } catch (fastErr) {
+                console.warn('Direct media upload to phone failed, falling back to server API:', fastErr);
+            }
+        }
+    }
+
+    // 4. Server-Side Fallback via /api/upload-media (with robust error handling for payload limits)
+    const base64Data = await getBase64(file);
     const res = await fetch('/api/upload-media', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3822,12 +3945,23 @@ async function getMetaHeaderHandle(file) {
         })
     });
 
-    const data = await res.json();
+    const rawText = await res.text();
+    let data = null;
+    try {
+        data = JSON.parse(rawText);
+    } catch (parseErr) {
+        if (res.status === 413 || rawText.includes('Request Entity Too Large') || rawText.includes('FUNCTION_PAYLOAD_TOO_LARGE')) {
+            throw new Error(`File is too large for server upload (${(file.size / (1024 * 1024)).toFixed(1)}MB). Please choose a smaller file under 3MB.`);
+        }
+        throw new Error(`Upload error (${res.status}): ${rawText.slice(0, 150)}`);
+    }
+
     if (data.error) {
         throw new Error(data.error);
     }
 
     if (data.handle) {
+        currentMediaSampleHandle = data.handle;
         return data.handle;
     }
 
