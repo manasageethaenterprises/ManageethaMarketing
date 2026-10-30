@@ -18,6 +18,7 @@ module.exports = async (req, res) => {
         await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_saved BOOLEAN DEFAULT true;`;
         await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Open - Not Contacted';`;
         await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';`;
+        await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS product_interested TEXT DEFAULT '';`;
     } catch(e) {
         // Table/column might already exist
     }
@@ -28,6 +29,7 @@ module.exports = async (req, res) => {
                 SELECT c.*, 
                        COALESCE(c.status, 'Open - Not Contacted') as status,
                        COALESCE(c.description, '') as description,
+                       COALESCE(c.product_interested, '') as product_interested,
                        (SELECT COUNT(*) FROM messages m WHERE m.customer_id = c.id) as message_count,
                        (SELECT COUNT(*) FROM messages m WHERE m.customer_id = c.id AND m.direction = 'inbound' AND m.status = 'delivered') as unread_count,
                        (SELECT MAX(created_at) FROM messages m WHERE m.customer_id = c.id AND m.direction = 'inbound') as last_inbound_at,
@@ -48,7 +50,7 @@ module.exports = async (req, res) => {
 
     if (req.method === 'PATCH') {
         try {
-            const { id, status, name, phone, description } = req.body;
+            const { id, status, name, phone, description, product_interested } = req.body;
             if (!id) return res.status(400).json({ error: 'Customer ID required' });
 
             const cleanPhone = phone ? formatIndiaPhone(phone) : null;
@@ -56,6 +58,7 @@ module.exports = async (req, res) => {
                 UPDATE customers 
                 SET status = COALESCE(${status !== undefined ? status : null}, status),
                     description = COALESCE(${description !== undefined ? description : null}, description),
+                    product_interested = COALESCE(${product_interested !== undefined ? product_interested : null}, product_interested),
                     name = COALESCE(${name !== undefined ? name : null}, name),
                     phone = COALESCE(${cleanPhone !== null ? cleanPhone : null}, phone)
                 WHERE id = ${id}
@@ -74,13 +77,14 @@ module.exports = async (req, res) => {
     
     if (req.method === 'POST') {
         try {
-            const { id, name, phone, status, description } = req.body;
+            const { id, name, phone, status, description, product_interested } = req.body;
             if (!name || !phone) return res.status(400).json({ error: 'Name and phone required' });
             
             // Clean & format phone number (91 + 10 digits, handling double 91)
             const cleanPhone = formatIndiaPhone(phone);
             const custStatus = status || 'Open - Not Contacted';
             const custDesc = description !== undefined ? description : '';
+            const custProduct = product_interested !== undefined ? product_interested : '';
 
             if (id) {
                 const result = await sql`
@@ -88,7 +92,8 @@ module.exports = async (req, res) => {
                     SET name = ${name}, 
                         phone = ${cleanPhone}, 
                         status = COALESCE(${status !== undefined ? status : null}, status),
-                        description = COALESCE(${description !== undefined ? description : null}, description)
+                        description = COALESCE(${description !== undefined ? description : null}, description),
+                        product_interested = COALESCE(${product_interested !== undefined ? product_interested : null}, product_interested)
                     WHERE id = ${id}
                     RETURNING *
                 `;
@@ -96,8 +101,8 @@ module.exports = async (req, res) => {
             }
             
             const result = await sql`
-                INSERT INTO customers (name, phone, is_saved, status, description) 
-                VALUES (${name}, ${cleanPhone}, true, ${custStatus}, ${custDesc}) 
+                INSERT INTO customers (name, phone, is_saved, status, description, product_interested) 
+                VALUES (${name}, ${cleanPhone}, true, ${custStatus}, ${custDesc}, ${custProduct}) 
                 ON CONFLICT (phone) DO UPDATE SET 
                     name = EXCLUDED.name, 
                     is_saved = true,
@@ -105,6 +110,10 @@ module.exports = async (req, res) => {
                     description = CASE 
                         WHEN EXCLUDED.description IS NOT NULL AND EXCLUDED.description != '' THEN EXCLUDED.description 
                         ELSE customers.description 
+                    END,
+                    product_interested = CASE 
+                        WHEN EXCLUDED.product_interested IS NOT NULL AND EXCLUDED.product_interested != '' THEN EXCLUDED.product_interested 
+                        ELSE customers.product_interested 
                     END
                 RETURNING *
             `;

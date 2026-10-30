@@ -526,11 +526,77 @@ window.updateCustomerStatus = async function updateCustomerStatus(id, newStatus,
     }
 };
 
+// --- Product Interested Helpers ---
+function getProductKey(product) {
+    if (!product) return 'none';
+    const p = String(product).toLowerCase();
+    if (p.includes('rotavator')) return 'rotavators';
+    if (p.includes('baler')) return 'baler';
+    if (p.includes('other')) return 'others';
+    return 'none';
+}
+
+window.updateCustomerProduct = async function updateCustomerProduct(id, newProduct, selectEl = null) {
+    if (!id) return;
+
+    const numId = parseInt(id, 10);
+    const key = getProductKey(newProduct);
+
+    if (selectEl) {
+        selectEl.className = selectEl.classList.contains('chat-header-product-select')
+            ? `chat-header-product-select product-${key}`
+            : `product-select-badge product-${key}`;
+    }
+
+    // Optimistic local state updates
+    const targetCust = (allCustomers || []).find(c => c.id === numId || c.id === id);
+    if (targetCust) targetCust.product_interested = newProduct;
+
+    const targetFiltered = (filteredCustomers || []).find(c => c.id === numId || c.id === id);
+    if (targetFiltered) targetFiltered.product_interested = newProduct;
+
+    const inboxCust = (inboxCustomersList || []).find(c => c.id === numId || c.id === id);
+    if (inboxCust) inboxCust.product_interested = newProduct;
+
+    const bcCust = (broadcastCustomersCache || []).find(c => c.id === numId || c.id === id);
+    if (bcCust) bcCust.product_interested = newProduct;
+
+    if (activeCustomerData && (activeCustomerData.id === numId || activeCustomerData.id === id)) {
+        activeCustomerData.product_interested = newProduct;
+        const chatProductSelect = document.getElementById('chat-header-product-select');
+        if (chatProductSelect && chatProductSelect !== selectEl) {
+            chatProductSelect.value = newProduct || '';
+            chatProductSelect.className = `chat-header-product-select product-${key}`;
+        }
+        syncChatNotesUI(activeCustomerData);
+    }
+
+    // Refresh inbox contacts list and sidebar cards
+    if (typeof filterAndRenderInboxContacts === 'function') {
+        filterAndRenderInboxContacts();
+    }
+
+    try {
+        const res = await fetch('/api/customers', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: numId || id, product_interested: newProduct || '' })
+        });
+        const data = await res.json();
+        if (data.error) {
+            throw new Error(data.error);
+        }
+    } catch (err) {
+        console.error('Failed to update product interested:', err);
+        showModal('Product Update Error', 'Could not update product interested: ' + err.message);
+    }
+};
+
 // --- Customers Logic ---
 async function loadCustomers() {
     const tbody = document.getElementById('customers-table-body');
     if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="5"><div class="loading-spinner-container"><div class="spinner-icon"></div><span>Loading customer directory...</span></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7"><div class="loading-spinner-container"><div class="spinner-icon"></div><span>Loading customer directory...</span></div></td></tr>`;
     }
     try {
         const res = await fetch('/api/customers');
@@ -538,7 +604,7 @@ async function loadCustomers() {
         
         if (customers.error) {
             console.error('API Error:', customers.error);
-            if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="empty-state" style="height:100px;">Failed to load customers.</td></tr>`;
+            if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-state" style="height:100px;">Failed to load customers.</td></tr>`;
             return;
         }
         
@@ -549,24 +615,35 @@ async function loadCustomers() {
         if(statEl) statEl.textContent = allCustomers.length;
     } catch (e) { 
         console.error('Error loading customers:', e);
-        if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="height:100px;">Error loading data.</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-state" style="height:100px;">Error loading data.</td></tr>`;
     }
 }
 
 function applyCustomerFilters() {
     const query = document.getElementById('customers-search')?.value.toLowerCase().trim() || '';
     const statusFilter = document.getElementById('customers-status-filter')?.value || 'all';
+    const productFilter = document.getElementById('customers-product-filter')?.value || 'all';
 
     filteredCustomers = allCustomers.filter(c => {
         const matchesQuery = (!query) ||
             (c.name && c.name.toLowerCase().includes(query)) || 
             (c.phone && c.phone.toLowerCase().includes(query)) ||
-            (c.description && c.description.toLowerCase().includes(query));
+            (c.description && c.description.toLowerCase().includes(query)) ||
+            (c.product_interested && c.product_interested.toLowerCase().includes(query));
         if (!matchesQuery) return false;
 
         if (statusFilter !== 'all') {
             const custStatus = c.status || 'Open - Not Contacted';
             if (custStatus !== statusFilter) return false;
+        }
+
+        if (productFilter !== 'all') {
+            const custProduct = c.product_interested || '';
+            if (productFilter === 'none') {
+                if (custProduct !== '') return false;
+            } else if (custProduct.toLowerCase() !== productFilter.toLowerCase()) {
+                return false;
+            }
         }
         return true;
     });
@@ -609,6 +686,8 @@ function renderCustomersTable() {
         const tr = document.createElement('tr');
         const custStatus = c.status || 'Open - Not Contacted';
         const statusKey = getStatusKey(custStatus);
+        const custProduct = c.product_interested || '';
+        const prodKey = getProductKey(custProduct);
         const custDesc = c.description || '';
 
         tr.innerHTML = `
@@ -631,6 +710,16 @@ function renderCustomersTable() {
                     <option value="Converted" ${custStatus === 'Converted' ? 'selected' : ''}>🟢 Converted</option>
                 </select>
             </td>
+            <td>
+                <select class="product-select-badge product-${prodKey}" 
+                        onchange="updateCustomerProduct(${c.id}, this.value, this)" 
+                        title="Click to update product interested">
+                    <option value="" ${!custProduct ? 'selected' : ''}>-- None --</option>
+                    <option value="Rotavators" ${custProduct === 'Rotavators' ? 'selected' : ''}>🚜 Rotavators</option>
+                    <option value="Baler" ${custProduct === 'Baler' ? 'selected' : ''}>📦 Baler</option>
+                    <option value="Others" ${custProduct === 'Others' ? 'selected' : ''}>✨ Others</option>
+                </select>
+            </td>
             <td class="cust-notes-td">
                 <div class="cust-notes-cell" onclick="openCustomerNoteModal(${c.id})" title="Click to view or update conversation notes">
                     <span class="cust-notes-snippet ${!custDesc ? 'is-empty' : ''}">${custDesc ? escapeHtml(custDesc) : '<em>+ Add conversation notes...</em>'}</span>
@@ -649,7 +738,7 @@ function renderCustomersTable() {
     });
 
     if (totalItems === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="height: 100px;">No matching customers found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-state" style="height: 100px;">No matching customers found.</td></tr>`;
     }
 
     if (pageInfo) {
@@ -662,6 +751,7 @@ function renderCustomersTable() {
 
 document.getElementById('customers-search')?.addEventListener('input', applyCustomerFilters);
 document.getElementById('customers-status-filter')?.addEventListener('change', applyCustomerFilters);
+document.getElementById('customers-product-filter')?.addEventListener('change', applyCustomerFilters);
 
 document.getElementById('btn-prev-page')?.addEventListener('click', () => {
     if (currentCustomersPage > 1) {
@@ -698,6 +788,11 @@ window.editCustomer = (id) => {
         statusSelect.value = customer.status || 'Open - Not Contacted';
     }
 
+    const prodSelect = document.getElementById('cust-product');
+    if (prodSelect) {
+        prodSelect.value = customer.product_interested || '';
+    }
+
     const descInput = document.getElementById('cust-description');
     if (descInput) {
         descInput.value = customer.description || '';
@@ -712,6 +807,8 @@ document.getElementById('btn-cancel-edit')?.addEventListener('click', () => {
     document.getElementById('cust-id').value = '';
     const statusSelect = document.getElementById('cust-status');
     if (statusSelect) statusSelect.value = 'Open - Not Contacted';
+    const prodSelect = document.getElementById('cust-product');
+    if (prodSelect) prodSelect.value = '';
     const descInput = document.getElementById('cust-description');
     if (descInput) descInput.value = '';
     document.getElementById('btn-save-cust').innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg><span>Add Customer</span>`;
@@ -724,13 +821,14 @@ document.getElementById('add-customer-form')?.addEventListener('submit', async (
     const name = document.getElementById('cust-name').value;
     const phone = formatIndiaPhone(document.getElementById('cust-phone').value);
     const status = document.getElementById('cust-status')?.value || 'Open - Not Contacted';
+    const product_interested = document.getElementById('cust-product')?.value || '';
     const description = document.getElementById('cust-description')?.value.trim() || '';
     
     const performSave = async () => {
         await fetch('/api/customers', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ id: custId || undefined, name, phone, status, description })
+            body: JSON.stringify({ id: custId || undefined, name, phone, status, description, product_interested })
         });
         document.getElementById('btn-cancel-edit').click();
         loadCustomers();
@@ -757,14 +855,22 @@ function syncChatNotesUI(customer) {
     if (!customer) return;
     const strip = document.getElementById('chat-note-strip');
     const noteText = document.getElementById('chat-note-text');
-    if (strip && noteText) {
+    const prodTag = document.getElementById('chat-strip-product-tag');
+    if (strip) {
         strip.style.display = 'flex';
-        if (customer.description && customer.description.trim()) {
-            noteText.textContent = customer.description;
-            noteText.className = 'chat-note-text';
-        } else {
-            noteText.textContent = 'No conversation notes recorded yet. Click "Edit Note" to log discussion.';
-            noteText.className = 'chat-note-text is-empty';
+        if (noteText) {
+            if (customer.description && customer.description.trim()) {
+                noteText.textContent = customer.description;
+                noteText.className = 'chat-note-text';
+            } else {
+                noteText.textContent = 'No conversation notes recorded yet. Click "Edit Note" to log discussion.';
+                noteText.className = 'chat-note-text is-empty';
+            }
+        }
+        if (prodTag) {
+            const prod = customer.product_interested || '';
+            const icon = prod === 'Rotavators' ? '🚜' : prod === 'Baler' ? '📦' : prod === 'Others' ? '✨' : '🏷️';
+            prodTag.innerHTML = `${icon} Product: <strong>${escapeHtml(prod || 'Not Set')}</strong>`;
         }
     }
 }
@@ -787,6 +893,11 @@ window.openCustomerNoteModal = (id) => {
     const statusSelect = document.getElementById('note-modal-status-select');
     if (statusSelect) {
         statusSelect.value = customer.status || 'Open - Not Contacted';
+    }
+
+    const productSelect = document.getElementById('note-modal-product-select');
+    if (productSelect) {
+        productSelect.value = customer.product_interested || '';
     }
 
     const textarea = document.getElementById('note-modal-textarea');
@@ -812,6 +923,7 @@ window.openCustomerNoteModal = (id) => {
     if (saveBtn) {
         saveBtn.onclick = async () => {
             const newStatus = statusSelect ? statusSelect.value : customer.status;
+            const newProduct = productSelect ? productSelect.value : (customer.product_interested || '');
             const newNotes = textarea ? textarea.value.trim() : '';
 
             saveBtn.disabled = true;
@@ -821,7 +933,7 @@ window.openCustomerNoteModal = (id) => {
                 const res = await fetch('/api/customers', {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: customer.id, status: newStatus, description: newNotes })
+                    body: JSON.stringify({ id: customer.id, status: newStatus, description: newNotes, product_interested: newProduct })
                 });
 
                 if (!res.ok) throw new Error('Failed to update notes');
@@ -829,21 +941,31 @@ window.openCustomerNoteModal = (id) => {
                 // Update in all local arrays
                 customer.status = newStatus;
                 customer.description = newNotes;
+                customer.product_interested = newProduct;
 
                 const matchAll = (allCustomers || []).find(c => c.id === customer.id);
                 if (matchAll) {
                     matchAll.status = newStatus;
                     matchAll.description = newNotes;
+                    matchAll.product_interested = newProduct;
                 }
                 const matchFiltered = (filteredCustomers || []).find(c => c.id === customer.id);
                 if (matchFiltered) {
                     matchFiltered.status = newStatus;
                     matchFiltered.description = newNotes;
+                    matchFiltered.product_interested = newProduct;
                 }
                 const matchInbox = (inboxCustomersList || []).find(c => c.id === customer.id);
                 if (matchInbox) {
                     matchInbox.status = newStatus;
                     matchInbox.description = newNotes;
+                    matchInbox.product_interested = newProduct;
+                }
+                const matchBc = (broadcastCustomersCache || []).find(c => c.id === customer.id);
+                if (matchBc) {
+                    matchBc.status = newStatus;
+                    matchBc.description = newNotes;
+                    matchBc.product_interested = newProduct;
                 }
 
                 renderCustomersTable();
@@ -859,6 +981,11 @@ window.openCustomerNoteModal = (id) => {
                     if (chatHeaderSelect) {
                         chatHeaderSelect.value = newStatus;
                         chatHeaderSelect.className = `chat-header-status-select status-${getStatusKey(newStatus)}`;
+                    }
+                    const chatHeaderProdSelect = document.getElementById('chat-header-product-select');
+                    if (chatHeaderProdSelect) {
+                        chatHeaderProdSelect.value = newProduct;
+                        chatHeaderProdSelect.className = `chat-header-product-select product-${getProductKey(newProduct)}`;
                     }
                 }
 
@@ -991,11 +1118,15 @@ document.getElementById('excel-upload')?.addEventListener('change', async (e) =>
                         const keys = Object.keys(row);
                         const nameKey = keys.find(k => k.toLowerCase().includes('name')) || keys[0];
                         const phoneKey = keys.find(k => k.toLowerCase().includes('phone') || k.toLowerCase().includes('mobile')) || keys[1];
+                        const productKey = keys.find(k => k.toLowerCase().includes('product'));
+                        const descKey = keys.find(k => k.toLowerCase().includes('note') || k.toLowerCase().includes('desc'));
                         const rawPhone = row[phoneKey];
                         const formattedPhone = formatIndiaPhone(rawPhone);
                         return { 
                             name: row[nameKey] ? String(row[nameKey]).trim() : 'Customer', 
-                            phone: formattedPhone 
+                            phone: formattedPhone,
+                            product_interested: productKey && row[productKey] ? String(row[productKey]).trim() : '',
+                            description: descKey && row[descKey] ? String(row[descKey]).trim() : ''
                         };
                     }).filter(c => c.phone && c.phone.length >= 10);
 
@@ -1067,6 +1198,7 @@ function exportFilteredCustomers() {
             "Phone Number": cleanPhone,
             "Display Phone": formatDisplayPhone(c.phone),
             "Status": c.status || "Open - Not Contacted",
+            "Product Interested": c.product_interested || "Not Specified",
             "Conversation Notes": c.description || "",
             "Messages Count": parseInt(c.message_count, 10) || 0,
             "Unread Messages": parseInt(c.unread_count, 10) || 0,
@@ -1092,6 +1224,7 @@ function exportFilteredCustomers() {
         { wch: 16 }, // Phone Number
         { wch: 18 }, // Display Phone
         { wch: 22 }, // Status
+        { wch: 20 }, // Product Interested
         { wch: 35 }, // Conversation Notes
         { wch: 16 }, // Messages Count
         { wch: 16 }, // Unread Messages
@@ -1243,6 +1376,7 @@ async function exportFilteredCustomersPdf() {
         const phoneFormatted = formatDisplayPhone(c.phone);
         const msgCount = `${c.message_count || 0} msgs`;
         const custStatus = c.status || 'Open - Not Contacted';
+        const custProduct = c.product_interested || '-';
         const custDesc = c.description ? c.description.slice(0, 140) : '-';
 
         return [
@@ -1250,6 +1384,7 @@ async function exportFilteredCustomersPdf() {
             c.name || 'Customer',
             phoneFormatted,
             custStatus,
+            custProduct,
             custDesc,
             msgCount
         ];
@@ -1258,7 +1393,7 @@ async function exportFilteredCustomersPdf() {
     // AutoTable Generation
     doc.autoTable({
         startY: 116,
-        head: [['S.No', 'Customer Name', 'Phone Number', 'Status', 'Conversation Notes', 'Messages']],
+        head: [['S.No', 'Customer Name', 'Phone Number', 'Status', 'Product', 'Conversation Notes', 'Messages']],
         body: tableData,
         theme: 'striped',
         margin: { left: 30, right: 30, bottom: 42 },
@@ -1282,11 +1417,12 @@ async function exportFilteredCustomersPdf() {
         },
         columnStyles: {
             0: { cellWidth: 26, halign: 'center' },
-            1: { cellWidth: 105, fontStyle: 'bold' },
-            2: { cellWidth: 90 },
-            3: { cellWidth: 105, fontStyle: 'bold' },
-            4: { cellWidth: 154 },
-            5: { cellWidth: 55, halign: 'center' }
+            1: { cellWidth: 95, fontStyle: 'bold' },
+            2: { cellWidth: 85 },
+            3: { cellWidth: 85, fontStyle: 'bold' },
+            4: { cellWidth: 70 },
+            5: { cellWidth: 130 },
+            6: { cellWidth: 48, halign: 'center' }
         },
         didParseCell: function(data) {
             if (data.section === 'body' && data.column.index === 3) {
@@ -3535,6 +3671,8 @@ window.applyBroadcastCustomRange = function applyBroadcastCustomRange() {
 
 window.filterBroadcastCustomerList = function filterBroadcastCustomerList() {
     const searchVal = (document.getElementById('bc-customer-search')?.value || '').toLowerCase().trim();
+    const prodVal = document.getElementById('bc-product-filter')?.value || 'all';
+    const statusVal = document.getElementById('bc-status-filter')?.value || 'all';
     let visibleCount = 0;
     const optionLabels = document.querySelectorAll('#bc-target-list .option-item');
 
@@ -3551,11 +3689,20 @@ window.filterBroadcastCustomerList = function filterBroadcastCustomerList() {
         const matchesSearch = !searchVal || (
             (cust.name && cust.name.toLowerCase().includes(searchVal)) ||
             (cust.phone && cust.phone.includes(searchVal)) ||
+            (cust.product_interested && cust.product_interested.toLowerCase().includes(searchVal)) ||
             String(srNo) === searchVal ||
             ('#' + srNo) === searchVal
         );
 
-        if (matchesRange && matchesSearch) {
+        const custProd = cust.product_interested || '';
+        const matchesProduct = (prodVal === 'all') || (
+            prodVal === 'none' ? !custProd : custProd.toLowerCase() === prodVal.toLowerCase()
+        );
+
+        const custStatus = cust.status || 'Open - Not Contacted';
+        const matchesStatus = (statusVal === 'all') || (custStatus === statusVal);
+
+        if (matchesRange && matchesSearch && matchesProduct && matchesStatus) {
             label.style.display = 'flex';
             visibleCount++;
         } else {
@@ -3565,10 +3712,14 @@ window.filterBroadcastCustomerList = function filterBroadcastCustomerList() {
 
     const selectAllLabel = document.getElementById('bc-select-all-label');
     if (selectAllLabel) {
-        if (activeBroadcastRangeFilter) {
-            selectAllLabel.textContent = `Select All in Range #${activeBroadcastRangeFilter.start}-#${activeBroadcastRangeFilter.end} (${visibleCount})`;
-        } else if (searchVal) {
-            selectAllLabel.textContent = `Select All Filtered (${visibleCount})`;
+        const filterParts = [];
+        if (prodVal !== 'all') filterParts.push(prodVal === 'none' ? 'No Product' : prodVal);
+        if (statusVal !== 'all') filterParts.push(getStatusShort(statusVal));
+        if (activeBroadcastRangeFilter) filterParts.push(`#${activeBroadcastRangeFilter.start}-#${activeBroadcastRangeFilter.end}`);
+        if (searchVal) filterParts.push(`"${searchVal}"`);
+
+        if (filterParts.length > 0) {
+            selectAllLabel.textContent = `Select All Matching (${filterParts.join(', ')}: ${visibleCount})`;
         } else {
             selectAllLabel.textContent = `Select All Customers (${broadcastCustomersCache.length})`;
         }
@@ -3576,8 +3727,36 @@ window.filterBroadcastCustomerList = function filterBroadcastCustomerList() {
 
     const countBadge = document.getElementById('bc-matching-count-badge');
     if (countBadge) {
-        countBadge.textContent = `${visibleCount} shown`;
+        countBadge.textContent = `${visibleCount} matching`;
     }
+};
+
+window.onBroadcastFilterChange = function onBroadcastFilterChange() {
+    filterBroadcastCustomerList();
+};
+
+window.clearBroadcastAudienceFilters = function clearBroadcastAudienceFilters() {
+    const prod = document.getElementById('bc-product-filter');
+    const stat = document.getElementById('bc-status-filter');
+    if (prod) prod.value = 'all';
+    if (stat) stat.value = 'all';
+    filterBroadcastCustomerList();
+};
+
+window.selectFilteredBroadcastCustomers = function selectFilteredBroadcastCustomers() {
+    let checkedCount = 0;
+    document.querySelectorAll('#bc-target-list .option-item').forEach(item => {
+        if (item.style.display !== 'none') {
+            const cb = item.querySelector('.bc-cust-cb');
+            if (cb) {
+                cb.checked = true;
+                checkedCount++;
+            }
+        }
+    });
+    const selectAll = document.getElementById('bc-select-all');
+    if (selectAll) selectAll.checked = checkedCount > 0;
+    updateBcDisplay();
 };
 
 async function loadCustomersForSelect() {
@@ -3598,14 +3777,24 @@ async function loadCustomersForSelect() {
                 label.className = 'option-item bc-customer-row';
                 label.setAttribute('data-id', c.id);
                 label.setAttribute('data-sr', srNo);
+                const prodKey = getProductKey(c.product_interested);
+                const statusKey = getStatusKey(c.status || 'Open - Not Contacted');
+                const statusShort = getStatusShort(c.status || 'Open - Not Contacted');
+                const prodBadge = c.product_interested 
+                    ? `<span class="product-mini-pill product-${prodKey}">${escapeHtml(c.product_interested)}</span>`
+                    : '';
                 label.innerHTML = `
-                    <div class="bc-cust-left">
+                    <div class="bc-cust-left" style="display:flex; align-items:center; gap:0.5rem; flex:1; min-width:0;">
                         <input type="checkbox" class="bc-cust-cb" value="${c.id}">
                         <span class="bc-sr-badge" title="Customer Serial Number">#${srNo}</span>
-                        <div class="bc-cust-meta">
+                        <div class="bc-cust-meta" style="min-width:0;">
                             <span class="bc-cust-name" title="${escapeHtml(c.name || 'Unnamed')}">${escapeHtml(c.name || 'Unnamed')}</span>
                             <span class="bc-cust-phone">(${escapeHtml(c.phone || '')})</span>
                         </div>
+                    </div>
+                    <div class="bc-cust-right" style="display:flex; align-items:center; gap:0.35rem; margin-left:auto; flex-shrink:0;">
+                        ${prodBadge}
+                        <span class="status-pill status-${statusKey}" style="font-size:0.65rem; padding:0.12rem 0.4rem;">${statusShort}</span>
                     </div>
                 `;
                 list.appendChild(label);
@@ -3665,12 +3854,20 @@ function updateBcDisplay() {
     selectedCustomerIds = Array.from(cbs).map(cb => cb.value);
     
     const selectAll = document.getElementById('bc-select-all');
+    const prodVal = document.getElementById('bc-product-filter')?.value || 'all';
+    const statusVal = document.getElementById('bc-status-filter')?.value || 'all';
+    const hasFilter = prodVal !== 'all' || statusVal !== 'all' || !!activeBroadcastRangeFilter;
+
     if (selectedCustomerIds.length === 0) {
         bcDisplay.textContent = "Select Audience...";
-    } else if (selectAll?.checked && !activeBroadcastRangeFilter) {
+    } else if (selectAll?.checked && !hasFilter) {
         bcDisplay.textContent = `All Customers Selected (${broadcastCustomersCache.length})`;
-    } else if (activeBroadcastRangeFilter) {
-        bcDisplay.textContent = `🎯 ${selectedCustomerIds.length} Customer(s) in Range #${activeBroadcastRangeFilter.start}-#${activeBroadcastRangeFilter.end} Selected`;
+    } else if (hasFilter) {
+        const tags = [];
+        if (prodVal !== 'all') tags.push(prodVal === 'none' ? 'No Product' : prodVal);
+        if (statusVal !== 'all') tags.push(getStatusShort(statusVal));
+        if (activeBroadcastRangeFilter) tags.push(`Range #${activeBroadcastRangeFilter.start}-#${activeBroadcastRangeFilter.end}`);
+        bcDisplay.textContent = `🎯 ${selectedCustomerIds.length} Customer(s) Selected [${tags.join(', ')}]`;
     } else {
         bcDisplay.textContent = `${selectedCustomerIds.length} Customer(s) Selected`;
     }
@@ -4000,6 +4197,10 @@ function resetBroadcastForm() {
     if (sel) sel.value = '';
     const clearBtn = document.getElementById('btn-bc-clear-range-filter');
     if (clearBtn) clearBtn.style.display = 'none';
+    const prodFilter = document.getElementById('bc-product-filter');
+    if (prodFilter) prodFilter.value = 'all';
+    const statFilter = document.getElementById('bc-status-filter');
+    if (statFilter) statFilter.value = 'all';
     populateBroadcastRangeOptions();
     filterBroadcastCustomerList();
     
@@ -4109,24 +4310,54 @@ document.getElementById('broadcast-form')?.addEventListener('submit', async (e) 
         const checkedCbs = document.querySelectorAll('.bc-cust-cb:checked');
         const checkedIds = Array.from(checkedCbs).map(cb => String(cb.value));
 
-        if (isSelectAll && !activeBroadcastRangeFilter) {
-            const res = await fetch('/api/customers');
-            const allCust = await res.json();
-            if (Array.isArray(allCust)) targetList = allCust;
-        } else if (checkedIds.length > 0) {
-            if (broadcastCustomersCache && broadcastCustomersCache.length > 0) {
-                targetList = broadcastCustomersCache.filter(c => checkedIds.includes(String(c.id)));
-            } else {
-                const res = await fetch('/api/customers');
-                const allCust = await res.json();
-                if (Array.isArray(allCust)) {
-                    targetList = allCust.filter(c => checkedIds.includes(String(c.id)));
+        const pool = (broadcastCustomersCache && broadcastCustomersCache.length > 0)
+            ? broadcastCustomersCache
+            : await (await fetch('/api/customers')).json();
+
+        const prodFilter = document.getElementById('bc-product-filter')?.value || 'all';
+        const statFilter = document.getElementById('bc-status-filter')?.value || 'all';
+        const searchVal = (document.getElementById('bc-customer-search')?.value || '').toLowerCase().trim();
+        const hasActiveFilter = (prodFilter !== 'all') || (statFilter !== 'all') || !!activeBroadcastRangeFilter || !!searchVal;
+
+        if (checkedIds.length > 0) {
+            if (Array.isArray(pool)) {
+                targetList = pool.filter(c => checkedIds.includes(String(c.id)));
+            }
+        } else if (isSelectAll) {
+            if (Array.isArray(pool)) {
+                if (!hasActiveFilter) {
+                    targetList = pool;
+                } else {
+                    targetList = pool.filter((c, idx) => {
+                        const sr = idx + 1;
+                        if (activeBroadcastRangeFilter && (sr < activeBroadcastRangeFilter.start || sr > activeBroadcastRangeFilter.end)) {
+                            return false;
+                        }
+                        if (prodFilter !== 'all') {
+                            const p = c.product_interested || '';
+                            if (prodFilter === 'none') {
+                                if (p !== '') return false;
+                            } else if (p.toLowerCase() !== prodFilter.toLowerCase()) {
+                                return false;
+                            }
+                        }
+                        if (statFilter !== 'all') {
+                            const s = c.status || 'Open - Not Contacted';
+                            if (s !== statFilter) return false;
+                        }
+                        if (searchVal) {
+                            const matchesSearch = (c.name && c.name.toLowerCase().includes(searchVal)) ||
+                                                  (c.phone && c.phone.includes(searchVal)) ||
+                                                  (c.product_interested && c.product_interested.toLowerCase().includes(searchVal)) ||
+                                                  String(sr) === searchVal ||
+                                                  ('#' + sr) === searchVal;
+                            if (!matchesSearch) return false;
+                        }
+                        return true;
+                    });
                 }
             }
         } else if (activeBroadcastRangeFilter) {
-            const pool = (broadcastCustomersCache && broadcastCustomersCache.length > 0)
-                ? broadcastCustomersCache
-                : await (await fetch('/api/customers')).json();
             if (Array.isArray(pool)) {
                 targetList = pool.filter((c, idx) => {
                     const sr = idx + 1;
@@ -4134,10 +4365,10 @@ document.getElementById('broadcast-form')?.addEventListener('submit', async (e) 
                 });
             }
         } else {
-            throw new Error("Please select at least one customer or range.");
+            throw new Error("Please select at least one customer, or select a product/status filter.");
         }
 
-        if (targetList.length === 0) throw new Error("No target customers found for broadcast.");
+        if (targetList.length === 0) throw new Error("No target customers found for broadcast matching your selection.");
 
         const type = document.getElementById('bc-type').value;
         const content = document.getElementById('bc-content').value;
@@ -4337,7 +4568,8 @@ function filterAndRenderInboxContacts() {
     const filtered = (inboxCustomersList || []).filter(c => {
         const matchesQuery = (!query) ||
                              (c.name && c.name.toLowerCase().includes(query)) ||
-                             (c.phone && c.phone.toLowerCase().includes(query));
+                             (c.phone && c.phone.toLowerCase().includes(query)) ||
+                             (c.product_interested && c.product_interested.toLowerCase().includes(query));
         if (!matchesQuery) return false;
 
         const is24hActive = c.last_inbound_at && (now - new Date(c.last_inbound_at).getTime() <= twentyFourHoursMs);
@@ -4443,9 +4675,12 @@ function renderInboxContacts(list) {
                     <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.name)}</span>
                     ${leadTagHtml}
                 </div>
-                <div style="display:flex; align-items:center; justify-content:space-between; gap:0.4rem; margin-top:0.2rem;">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:0.4rem; margin-top:0.2rem; flex-wrap:wrap;">
                     <div class="contact-phone">${formatDisplayPhone(c.phone)}</div>
-                    ${statusPillHtml}
+                    <div style="display:flex; align-items:center; gap:0.3rem;">
+                        ${c.product_interested ? `<span class="product-mini-pill product-${getProductKey(c.product_interested)}">${escapeHtml(c.product_interested)}</span>` : ''}
+                        ${statusPillHtml}
+                    </div>
                 </div>
                 ${lastMsgHtml}
             </div>
@@ -4682,6 +4917,14 @@ async function openChat(customer, pushHistory = true) {
         headerStatusSelect.className = `chat-header-status-select status-${getStatusKey(custStatus)}`;
     }
 
+    // Initialize Product Dropdown in Chat Header
+    const headerProductSelect = document.getElementById('chat-header-product-select');
+    if (headerProductSelect) {
+        const custProduct = customer.product_interested || '';
+        headerProductSelect.value = custProduct;
+        headerProductSelect.className = `chat-header-product-select product-${getProductKey(custProduct)}`;
+    }
+
     // Sync conversation notes strip
     syncChatNotesUI(customer);
 
@@ -4706,6 +4949,12 @@ document.getElementById('chat-header-status-select')?.addEventListener('change',
     await updateCustomerStatus(activeInboxCustomer, newStatus, e.target);
 });
 
+document.getElementById('chat-header-product-select')?.addEventListener('change', async (e) => {
+    if (!activeInboxCustomer) return;
+    const newProduct = e.target.value;
+    await updateCustomerProduct(activeInboxCustomer, newProduct, e.target);
+});
+
 document.getElementById('close-chat-btn')?.addEventListener('click', closeChat);
 
 function closeChat() {
@@ -4718,6 +4967,12 @@ function closeChat() {
 
     const strip = document.getElementById('chat-note-strip');
     if (strip) strip.style.display = 'none';
+
+    const headerProductSelect = document.getElementById('chat-header-product-select');
+    if (headerProductSelect) {
+        headerProductSelect.value = '';
+        headerProductSelect.className = 'chat-header-product-select product-none';
+    }
 
     document.getElementById('chat-reply-form').style.display = 'none';
     document.getElementById('chat-messages').innerHTML = `

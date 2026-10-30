@@ -15,12 +15,16 @@ module.exports = async (req, res) => {
     if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
     try {
-        const { customers } = req.body; // Array of {name, phone}
+        const { customers } = req.body; // Array of {name, phone, status, description, product_interested}
         if (!customers || !Array.isArray(customers)) {
             return res.status(400).json({ error: 'Invalid data format' });
         }
 
         const sql = getDb();
+        try {
+            await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS product_interested TEXT DEFAULT '';`;
+        } catch(e) {}
+
         let added = 0;
 
         for (const cust of customers) {
@@ -29,9 +33,10 @@ module.exports = async (req, res) => {
             const name = cust.name || 'Customer';
             const custStatus = cust.status || 'Open - Not Contacted';
             const custDesc = cust.description || cust.notes || '';
+            const custProduct = cust.product_interested || cust.product || '';
             await sql`
-                INSERT INTO customers (name, phone, is_saved, status, description) 
-                VALUES (${name}, ${cleanPhone}, true, ${custStatus}, ${custDesc}) 
+                INSERT INTO customers (name, phone, is_saved, status, description, product_interested) 
+                VALUES (${name}, ${cleanPhone}, true, ${custStatus}, ${custDesc}, ${custProduct}) 
                 ON CONFLICT (phone) DO UPDATE SET 
                     name = EXCLUDED.name, 
                     is_saved = true,
@@ -39,6 +44,10 @@ module.exports = async (req, res) => {
                     description = CASE 
                         WHEN EXCLUDED.description IS NOT NULL AND EXCLUDED.description != '' THEN EXCLUDED.description 
                         ELSE customers.description 
+                    END,
+                    product_interested = CASE 
+                        WHEN EXCLUDED.product_interested IS NOT NULL AND EXCLUDED.product_interested != '' THEN EXCLUDED.product_interested 
+                        ELSE customers.product_interested 
                     END
             `;
             added++;
